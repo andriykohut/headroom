@@ -1,0 +1,23 @@
+[project]
+name = "headroom-link"
+version = "0.1.0"
+description = "Render Claude Code credentials as a QR code for the Headroom Android app"
+requires-python = ">=3.14"
+dependencies = ["segno>=1.6.6"]
+
+[project.scripts]
+headroom-link = "headroom_link.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
+
+[build-system]
+requires = ["uv_build>=0.11.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# The plan lays the package out flat at tools/headroom_link, not under src/.
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
