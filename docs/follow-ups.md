@@ -46,6 +46,21 @@ with the server. It does not prove both agree with what Claude Code's own
 
 **How to settle it:** open the app and run `/usage` side by side.
 
+### The rate-limit backoff numbers are guesses
+
+A 429 now parks the app until `Retry-After` says otherwise, or for 30 minutes
+if the server does not say — longer than the 20-minute poll, so a hold always
+outlasts the next tick. Both numbers were chosen rather than measured; nobody
+knows what the endpoint's actual limit is, or over what window.
+
+**How to settle it:** find out what the limit is. Until then the 30 minutes is
+a safe guess rather than a right one.
+
+**Also unhandled:** `Retry-After` in its HTTP-date form. Only delta-seconds is
+read; a date falls back to the default. Legal per the spec, never observed
+here, and guessing at a date format to derive a wait is a worse failure than
+waiting a fixed amount.
+
 ## Deliberately not done
 
 ### Minification is off

@@ -44,6 +44,15 @@ class UsageRepository(
                 message = e.message ?: "Couldn't refresh your credentials.",
                 needsRelink = true,
             )
+        } catch (e: RateLimitedException) {
+            // Said plainly, and with when it lifts: "HTTP 429" tells the user
+            // nothing they can act on, and the app is going to stay quiet for a
+            // while either way.
+            UsageState.Failed(
+                snapshot = cache.load(),
+                message = rateLimitMessage(e.retryAtEpochSeconds),
+                needsRelink = false,
+            )
         } catch (e: UsageFetchException) {
             UsageState.Failed(
                 snapshot = cache.load(),
@@ -53,6 +62,12 @@ class UsageRepository(
         }
         _state.value = next
         return next
+    }
+
+    private fun rateLimitMessage(retryAt: Long): String {
+        val minutes = ((retryAt - now()) / 60).coerceAtLeast(1)
+        return "The server is asking for fewer requests. Headroom will try " +
+            "again in about $minutes min."
     }
 
     /** Age of a snapshot in seconds, for the "updated N ago" line. */

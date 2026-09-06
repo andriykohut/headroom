@@ -2,6 +2,7 @@ package dev.andrii.headroom.notify
 
 import dev.andrii.headroom.credential.RefreshFailedException
 import dev.andrii.headroom.data.NotLinkedException
+import dev.andrii.headroom.data.RateLimitedException
 import dev.andrii.headroom.data.SnapshotCache
 import dev.andrii.headroom.data.UsageFetchException
 import dev.andrii.headroom.domain.NotificationEvent
@@ -48,6 +49,11 @@ class NotificationCoordinator(
                 e.message ?: "Your credentials could not be refreshed. Scan a new code.",
             )
             return CycleResult(emptyList(), relinkNeeded = true, nextAlarmAt = null)
+        } catch (_: RateLimitedException) {
+            // No request was made, or the server refused one. Either way the
+            // next scheduled poll must not walk back into it - the gate is
+            // persisted, so it will refuse there too.
+            return CycleResult(emptyList(), relinkNeeded = false, nextAlarmAt = null)
         } catch (_: UsageFetchException) {
             // Transient. The cached snapshot and its age stay on screen.
             return CycleResult(emptyList(), relinkNeeded = false, nextAlarmAt = null)

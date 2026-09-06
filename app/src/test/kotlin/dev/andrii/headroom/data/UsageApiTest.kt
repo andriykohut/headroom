@@ -4,6 +4,7 @@ import dev.andrii.headroom.credential.CredentialStore
 import dev.andrii.headroom.credential.RefreshFailedException
 import dev.andrii.headroom.domain.BucketKind
 import dev.andrii.headroom.domain.Credential
+import io.ktor.http.HttpHeaders as KtorHeaders
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -60,8 +61,12 @@ class UsageApiTest {
         )
     }
 
-    private fun api(engine: MockEngine, store: CredentialStore) =
-        UsageApi(store, HttpClient(engine), now = { 1_787_000_000 })
+    private fun api(
+        engine: MockEngine,
+        store: CredentialStore,
+        gate: InMemoryRateLimitGate = InMemoryRateLimitGate(),
+        now: Long = 1_787_000_000,
+    ) = UsageApi(store, HttpClient(engine), gate, now = { now })
 
     @Test
     fun `fetches and parses a snapshot`() = runTest {
@@ -148,6 +153,98 @@ class UsageApiTest {
         assertTrue(e.message!!.contains("503"))
     }
 
+    // --- rate limiting ---
+
+    @Test
+    fun `a 429 raises RateLimitedException rather than a generic failure`() = runTest {
+        val engine = MockEngine { respondError(HttpStatusCode.TooManyRequests) }
+        assertFailsWith<RateLimitedException> {
+            api(engine, FakeCredentialStore(credential)).fetch()
+        }
+    }
+
+    @Test
+    fun `a 429 honours Retry-After`() = runTest {
+        val engine = MockEngine {
+            respond(
+                "", HttpStatusCode.TooManyRequests,
+                headersOf(KtorHeaders.RetryAfter, "120"),
+            )
+        }
+        val e = assertFailsWith<RateLimitedException> {
+            api(engine, FakeCredentialStore(credential)).fetch()
+        }
+        assertEquals(1_787_000_000 + 120, e.retryAtEpochSeconds)
+    }
+
+    @Test
+    fun `a 429 without Retry-After backs off past the next poll`() = runTest {
+        val engine = MockEngine { respondError(HttpStatusCode.TooManyRequests) }
+        val e = assertFailsWith<RateLimitedException> {
+            api(engine, FakeCredentialStore(credential)).fetch()
+        }
+        // The periodic poll is every 20 minutes; a shorter hold would let the
+        // very next tick walk straight back into the limit.
+        assertTrue(e.retryAtEpochSeconds - 1_787_000_000 > 20 * 60)
+    }
+
+    @Test
+    fun `a held gate makes no request at all`() = runTest {
+        // The whole point of a hold: not a polite request that gets refused,
+        // no request.
+        var calls = 0
+        val engine = MockEngine { calls++; respondError(HttpStatusCode.ServiceUnavailable) }
+        val gate = InMemoryRateLimitGate(retryAt = 1_787_000_500)
+        assertFailsWith<RateLimitedException> {
+            api(engine, FakeCredentialStore(credential), gate).fetch()
+        }
+        assertEquals(0, calls)
+    }
+
+    @Test
+    fun `the hold survives being read back by a later process`() = runTest {
+        // The poll worker runs in a fresh process; an in-memory gate would
+        // forget exactly when it mattered.
+        val gate = InMemoryRateLimitGate()
+        val engine = MockEngine { respondError(HttpStatusCode.TooManyRequests) }
+        runCatching { api(engine, FakeCredentialStore(credential), gate).fetch() }
+
+        var calls = 0
+        val later = MockEngine { calls++; respond(BODY, HttpStatusCode.OK) }
+        assertFailsWith<RateLimitedException> {
+            api(later, FakeCredentialStore(credential), gate).fetch()
+        }
+        assertEquals(0, calls)
+    }
+
+    @Test
+    fun `the hold expires`() = runTest {
+        val gate = InMemoryRateLimitGate(retryAt = 1_787_000_100)
+        val snapshot = api(
+            jsonEngine(), FakeCredentialStore(credential), gate, now = 1_787_000_200,
+        ).fetch()
+        assertNotNull(snapshot.bucket(BucketKind.SESSION))
+    }
+
+    @Test
+    fun `a success clears the hold`() = runTest {
+        val gate = InMemoryRateLimitGate(retryAt = 1_787_000_100)
+        api(jsonEngine(), FakeCredentialStore(credential), gate, now = 1_787_000_200).fetch()
+        assertEquals(0L, gate.retryAt())
+    }
+
+    @Test
+    fun `a non-429 failure does not clear an existing hold`() = runTest {
+        // A 503 says nothing about whether the rate limit has expired.
+        val gate = InMemoryRateLimitGate()
+        gate.hold(1_787_000_100)
+        val engine = MockEngine { respondError(HttpStatusCode.ServiceUnavailable) }
+        runCatching {
+            api(engine, FakeCredentialStore(credential), gate, now = 1_787_000_200).fetch()
+        }
+        assertEquals(1_787_000_100, gate.retryAt())
+    }
+
     @Test
     fun `error messages never contain the token`() = runTest {
         val engine = MockEngine { respondError(HttpStatusCode.ServiceUnavailable) }
@@ -156,4 +253,11 @@ class UsageApiTest {
         }
         assertFalse(e.message!!.contains("tok-abc123"))
     }
+}
+
+/** Shared test double; the real one is DataStore-backed. */
+class InMemoryRateLimitGate(private var retryAt: Long = 0L) : RateLimitGate {
+    override suspend fun retryAt(): Long = retryAt
+    override suspend fun hold(untilEpochSeconds: Long) { retryAt = untilEpochSeconds }
+    override suspend fun clear() { retryAt = 0L }
 }
