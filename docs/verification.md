@@ -101,8 +101,13 @@ that nothing warm appears in either theme. Every role is now set.
 - **A real at-the-wall response.** Nobody has seen the server's output from an
   account that is actually at its limit, so the wall trigger fires on 100% used
   rather than on any server flag. See `docs/discovery-notes.md`.
-- **A physical device.** Everything in the run above is an emulator. The camera
-  scan path is exercised only by its unit tests.
+- **A physical device.** Everything in the run above is an emulator.
+
+  Two things were settled by installing on a real phone afterwards. The app's
+  own CameraX + ML Kit scanner read the QR off a terminal and linked the
+  account first try — that path had only ever run on an emulator with no
+  camera, so it was previously covered by unit tests alone. And see the
+  status-bar bug below, which no emulator run had surfaced.
 
   Installing on a real phone immediately found what the emulator could not: the
   Usage screen drew behind the status bar, putting its refresh and settings

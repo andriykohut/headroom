@@ -38,14 +38,6 @@ at its limit and see whether anything in it distinguishes "full" from "refused".
 in spec §2. Nothing in the bar's anatomy, colour or copy, because "fully used"
 and "refused" look and read the same on this screen.
 
-### The camera scan path has never met a camera
-
-`interpretScan` is unit-tested for all three outcomes, and the QR has been read
-off a terminal by a phone's built-in camera app. But the app's own CameraX +
-ML Kit scanner has only ever run on an emulator, which has no real camera.
-
-**How to settle it:** link a phone by scanning, rather than by pasting.
-
 ### The `/usage` comparison was made against the API, not the panel
 
 Verification compared the app's numbers to the wire, which proves the app agrees
