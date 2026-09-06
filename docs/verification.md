@@ -101,10 +101,18 @@ that nothing warm appears in either theme. Every role is now set.
 - **A real at-the-wall response.** Nobody has seen the server's output from an
   account that is actually at its limit, so the wall trigger fires on 100% used
   rather than on any server flag. See `docs/discovery-notes.md`.
-- **A physical device.** Everything here is an emulator. The QR has been scanned
-  off a terminal by a real phone camera (recorded in the discovery notes), but
-  the app itself has only run emulated — so the camera scan path is exercised
-  only by its unit tests.
+- **A physical device.** Everything in the run above is an emulator. The camera
+  scan path is exercised only by its unit tests.
+
+  Installing on a real phone immediately found what the emulator could not: the
+  Usage screen drew behind the status bar, putting its refresh and settings
+  buttons under the clock and the battery. Android 15 forces edge-to-edge for
+  targetSdk 35+, and that screen — unlike Import and Settings, which get it from
+  their Scaffold — applied no window insets. The emulator's status bar is short
+  enough that the collision never appeared. Fixed, and re-checked on the
+  emulator with `cmd overlay enable
+  com.android.internal.display.cutout.emulation.tall`, which reproduces a tall
+  status bar.
 - **The `/usage` comparison was made against the API directly**, not against
   Claude Code's own panel. Same source, so it proves the app agrees with the
   wire, not that both agree with what the user is shown elsewhere.

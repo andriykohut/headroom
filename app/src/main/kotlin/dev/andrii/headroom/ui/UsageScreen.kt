@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -57,6 +60,12 @@ fun UsageScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            // Android 15 forces edge-to-edge for targetSdk 35+, so this draws
+            // behind the status and navigation bars unless it says otherwise.
+            // Import and Settings get this from their Scaffold; this screen has
+            // none, and without it the refresh and settings buttons sit under
+            // the clock and the battery.
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
     ) {
