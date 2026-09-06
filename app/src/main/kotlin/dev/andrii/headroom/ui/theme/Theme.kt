@@ -8,8 +8,11 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import dev.andrii.headroom.R
 
 /**
  * A fixed scheme, deliberately not dynamic colour.
@@ -69,19 +72,47 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
- * The M3 scale, with one deliberate exception.
+ * Atkinson Hyperlegible Next, bundled (OFL).
+ *
+ * Chosen for a screen that is mostly digits read at a glance: its figures are
+ * unambiguous where a grotesque's are not, and the slashed zero shows in
+ * "02:00" and "100".
+ */
+private val Atkinson = FontFamily(
+    Font(R.font.atkinson_regular, FontWeight.Normal),
+    Font(R.font.atkinson_semibold, FontWeight.SemiBold),
+    Font(R.font.atkinson_bold, FontWeight.Bold),
+)
+
+/**
+ * The M3 scale with the bundled family applied, and one deliberate exception.
  *
  * The hero number is larger than `displayLarge`'s default: a three-bar screen
  * leaves air, and the number is the thing the eye should land on. Tabular
  * figures stop the digits shifting as the value changes.
- *
- * The design specifies Atkinson Hyperlegible Next. It is not bundled here —
- * that needs the TTF in `res/font`, which this build does not carry — so the
- * platform default is used, which the design explicitly allows for.
  */
-private val AppTypography = Typography()
+private val AppTypography = Typography().let { base ->
+    Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = Atkinson),
+        displayMedium = base.displayMedium.copy(fontFamily = Atkinson),
+        displaySmall = base.displaySmall.copy(fontFamily = Atkinson),
+        headlineLarge = base.headlineLarge.copy(fontFamily = Atkinson),
+        headlineMedium = base.headlineMedium.copy(fontFamily = Atkinson),
+        headlineSmall = base.headlineSmall.copy(fontFamily = Atkinson),
+        titleLarge = base.titleLarge.copy(fontFamily = Atkinson),
+        titleMedium = base.titleMedium.copy(fontFamily = Atkinson),
+        titleSmall = base.titleSmall.copy(fontFamily = Atkinson),
+        bodyLarge = base.bodyLarge.copy(fontFamily = Atkinson),
+        bodyMedium = base.bodyMedium.copy(fontFamily = Atkinson),
+        bodySmall = base.bodySmall.copy(fontFamily = Atkinson),
+        labelLarge = base.labelLarge.copy(fontFamily = Atkinson),
+        labelMedium = base.labelMedium.copy(fontFamily = Atkinson),
+        labelSmall = base.labelSmall.copy(fontFamily = Atkinson),
+    )
+}
 
 val HeroNumberStyle = TextStyle(
+    fontFamily = Atkinson,
     fontSize = 72.sp,
     lineHeight = 80.sp,
     letterSpacing = (-2.5).sp,
@@ -90,6 +121,7 @@ val HeroNumberStyle = TextStyle(
 )
 
 val CompactNumberStyle = TextStyle(
+    fontFamily = Atkinson,
     fontSize = 24.sp,
     lineHeight = 32.sp,
     fontWeight = FontWeight.Normal,
