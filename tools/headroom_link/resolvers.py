@@ -6,11 +6,14 @@ tried; they never carry a token value.
 """
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .constants import (
-    CREDENTIAL_FILE, EXPIRY_KEY_ALIASES, REFRESH_KEY_ALIASES, TOKEN_KEY_ALIASES,
+    CREDENTIAL_FILE, EXPIRY_KEY_ALIASES, KEYCHAIN_SERVICE, REFRESH_KEY_ALIASES,
+    SECRET_TOOL_ATTRS, TOKEN_KEY_ALIASES,
 )
 from .payload import Tokens
 
@@ -88,3 +91,78 @@ class CredentialFileResolver:
                 f"{self._path} could not be parsed: {type(exc).__name__}"
             ) from None
         return tokens_from_mapping(data)
+
+
+def run_command(argv: list[str]) -> str | None:
+    """Run a lookup command, returning stdout, or None if it cannot succeed.
+
+    A missing binary and a missing secret are the same outcome to callers:
+    this source has nothing for us. Only a corrupt secret is an error.
+    """
+    if not shutil.which(argv[0]):
+        return None
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    out = done.stdout.strip()
+    return out or None
+
+
+class _CommandResolver:
+    """Shared behaviour for resolvers that shell out to a secret store."""
+
+    name = "command"
+    argv: list[str] = []
+
+    def __init__(self, runner: Callable[[list[str]], str | None] = run_command) -> None:
+        self._runner = runner
+
+    def _read(self) -> str | None:
+        return self._runner(self.argv)
+
+    def available(self) -> bool:
+        return self._read() is not None
+
+    def resolve(self) -> Tokens | None:
+        raw = self._read()
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+        except ValueError as exc:
+            raise ResolverError(
+                f"secret from {self.name} could not be parsed: {type(exc).__name__}"
+            ) from None
+        return tokens_from_mapping(data)
+
+
+class KeychainResolver(_CommandResolver):
+    name = "macos keychain"
+
+    def __init__(self, runner: Callable[[list[str]], str | None] = run_command) -> None:
+        super().__init__(runner)
+        self.argv = ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"]
+
+
+class SecretToolResolver(_CommandResolver):
+    name = "libsecret"
+
+    def __init__(self, runner: Callable[[list[str]], str | None] = run_command) -> None:
+        super().__init__(runner)
+        argv = ["secret-tool", "lookup"]
+        for key, value in SECRET_TOOL_ATTRS.items():
+            argv += [key, value]
+        self.argv = argv
+
+
+class KWalletResolver(_CommandResolver):
+    name = "kwallet"
+
+    def __init__(self, runner: Callable[[list[str]], str | None] = run_command) -> None:
+        super().__init__(runner)
+        self.argv = [
+            "kwallet-query", "-r", KEYCHAIN_SERVICE or "Claude Code", "kdewallet",
+        ]
