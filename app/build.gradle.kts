@@ -57,4 +57,5 @@ dependencies {
     // resolved for us. Naming the JUnit variant does both.
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.ktor.client.mock)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
