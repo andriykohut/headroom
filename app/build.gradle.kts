@@ -94,7 +94,7 @@ dependencies {
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
-    implementation(libs.mlkit.barcode)
+    implementation(libs.zxingcpp.android)
 
     // Not kotlin("test"): AGP 9 supplies Kotlin without the standalone
     // plugin, so neither the version nor the framework variant gets

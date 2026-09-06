@@ -7,7 +7,7 @@ koin = "4.2.2"
 work = "2.11.2"
 datastore = "1.2.1"
 camerax = "1.6.2"
-mlkitBarcode = "17.3.0"
+zxingcpp = "3.1.1"
 coreKtx = "1.19.0"
 lifecycle = "2.11.0"
 activityCompose = "1.13.0"
@@ -40,7 +40,7 @@ androidx-datastore-preferences = { module = "androidx.datastore:datastore-prefer
 camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
 camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
-mlkit-barcode = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkitBarcode" }
+zxingcpp-android = { module = "io.github.zxing-cpp:android", version.ref = "zxingcpp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

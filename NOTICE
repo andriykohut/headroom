@@ -32,15 +32,15 @@ Apache License 2.0:
   org.jetbrains.kotlin:* and org.jetbrains.kotlinx:* (stdlib, coroutines,
     serialization) — Copyright JetBrains s.r.o.
   io.ktor:* — Copyright JetBrains s.r.o.
+  com.squareup.okhttp3:okhttp (via ktor-client-okhttp) — Copyright Square, Inc.
   io.insert-koin:* — Copyright the Koin authors
+  io.github.zxing-cpp:android (zxing-cpp) — Copyright Axel Waggershauser and
+    the zxing-cpp contributors. The QR scanner. Chosen over Google's ML Kit
+    because it is open source and sends nothing to anyone; ML Kit reports
+    usage metrics to Google and its terms require the app to disclose that.
 
-Proprietary — see `docs/follow-ups.md`:
-
-  com.google.mlkit:barcode-scanning — Google. Distributed under the ML Kit
-    Terms of Service, not an open source licence, and it ships a closed-source
-    native library (libbarhopper_v3.so). This is the reason the app cannot
-    currently be published on F-Droid, whose inclusion policy forbids non-free
-    dependencies.
+Every runtime dependency is under an open source licence. Nothing in the
+shipped app is proprietary.
 
 ================================================================================
 Generator (tools/)

@@ -63,8 +63,9 @@ The first install has to be manual — Obtainium cannot install an app signed
 with a key Android has not seen before without the user approving it, same as
 any sideload.
 
-## Not currently possible: F-Droid
+## F-Droid
 
-F-Droid forbids non-free dependencies, and the barcode scanner is Google's
-ML Kit, which ships a closed-source native library. See `docs/follow-ups.md`
-for what swapping it would involve.
+Nothing in the app is non-free — the scanner is zxing-cpp (Apache-2.0) — so
+F-Droid's inclusion policy no longer excludes it. It has not been submitted.
+Doing so means a metadata/fastlane directory and a reproducible build recipe
+in F-Droid's format, which is its own piece of work.

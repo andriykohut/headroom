@@ -24,6 +24,17 @@ up to five hours.
 degrades gracefully; a reset notification that never arrives is the product not
 working.
 
+### The zxing-cpp scanner has not yet been tried on a phone
+
+The scanner was swapped from ML Kit to zxing-cpp after the app had already
+been linked once by camera. zxing-cpp is configured with every "try" option on
+(harder, rotate, invert, downscale) because our code is dense — version 15 at
+error correction L — and that is the case where a weaker decoder shows.
+
+**How to settle it:** link a phone by scanning with a build that carries
+zxing-cpp. If it struggles where ML Kit did not, the paste fallback still
+works, and the option set above is the first thing to tune.
+
 ### No response from an account actually at its limit
 
 The wall trigger fires on `percent >= 100`, because that is the only signal the
@@ -65,8 +76,8 @@ waiting a fixed amount.
 
 ### Minification is off
 
-The release APK is 62 MB. R8 would cut that substantially — most of the bulk is
-ML Kit's native barcode libraries across four ABIs.
+R8 would cut the release APK substantially. The remaining bulk is native code
+shipped for four ABIs, which is what ABI splits address.
 
 **Why it is off:** Ktor and Koin both resolve by reflection, and nothing in this
 project has been tested against a shrunk build. A smaller APK that fails to

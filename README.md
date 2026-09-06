@@ -63,9 +63,8 @@ handle updates.
 
 Android 12 or newer.
 
-> Not on Google Play or F-Droid. F-Droid is currently impossible because the
-> barcode scanner is Google's ML Kit, which is not open source; see
-> [`docs/follow-ups.md`](docs/follow-ups.md).
+> Not on Google Play or F-Droid yet. Every dependency is open source, so
+> F-Droid is possible — it just has not been submitted.
 
 ## Linking
 
@@ -109,13 +108,27 @@ of any kind** — no client ID, no endpoint URLs, no hostnames. Architecturally 
 is a generic OAuth usage meter that displays whatever credential you hand it;
 everything provider-specific arrives in the QR code, from your own machine.
 
-Two consequences you should know before using it:
+Three things you should know before using it, stated plainly:
 
-- Reading usage this way is **off-label**. It relies on an endpoint that is not
-  publicly documented and can change or stop working at any time.
-- The app refreshes the token it is given, which **may sign out Claude Code on
-  your computer** (and vice versa). If that happens, re-link — it is one
-  command.
+- **It is probably against the terms.** Anthropic's Consumer Terms of Service
+  (§3) prohibit accessing the Services *"through automated or non-human means,
+  whether through a bot, script, or otherwise"* except via an API key or where
+  explicitly permitted. Headroom polls an undocumented endpoint every twenty
+  minutes with your subscription credential. On a plain reading that is
+  automated access. The risk is to your account, and the choice is yours.
+- **At refresh time it identifies itself as Claude Code.** The app ships no
+  client ID, but the QR code carries the one Claude Code uses, read off your own
+  machine, and the app presents it when renewing the token — because that is
+  the only way the credential you have can be renewed. This is the thing
+  Anthropic could most reasonably object to, so it is said here rather than
+  buried in a design document.
+- **It may sign out Claude Code on your computer** (and vice versa), because
+  refreshing rotates a token the two of you share. If that happens, re-link —
+  it is one command.
+
+Nothing leaves your phone except requests to the two endpoints in your QR code.
+No analytics, no crash reporting, no third-party service. See
+[`PRIVACY.md`](PRIVACY.md).
 
 If you want an officially supported view of this data, use `/usage` in Claude
 Code.

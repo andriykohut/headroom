@@ -52,8 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
+import zxingcpp.BarcodeReader
 import dev.andrii.headroom.domain.Credential
 import dev.andrii.headroom.domain.CredentialImport
 import dev.andrii.headroom.domain.PayloadException
@@ -257,23 +256,35 @@ private fun CameraSquare(onText: (String) -> Unit) {
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
                 val provider = ProcessCameraProvider.getInstance(ctx).get()
-                val scanner = BarcodeScanning.getClient()
+                // zxing-cpp rather than ML Kit: open source, so F-Droid can carry
+                // it, and it sends nothing to anyone - ML Kit reports usage
+                // metrics to Google, which this app's privacy story cannot
+                // accommodate. Our code is dense (version 15 at error
+                // correction L), so the "try" options are all on: they cost
+                // milliseconds per frame and buy a scan off an angled screen.
+                val reader = BarcodeReader(
+                    BarcodeReader.Options(
+                        formats = setOf(BarcodeReader.Format.QR_CODE),
+                        tryHarder = true,
+                        tryRotate = true,
+                        tryInvert = true,
+                        tryDownscale = true,
+                    ),
+                )
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                 analysis.setAnalyzer(Executors.newSingleThreadExecutor()) { proxy ->
-                    val image = proxy.image
-                    if (image == null) {
+                    try {
+                        // Synchronous, straight off the Y plane. A frame the
+                        // reader cannot handle is skipped, not fatal: the next
+                        // one is 30ms away.
+                        runCatching { reader.read(proxy) }.getOrDefault(emptyList())
+                            .firstNotNullOfOrNull { it.text }
+                            ?.let(onText)
+                    } finally {
                         proxy.close()
-                        return@setAnalyzer
                     }
-                    scanner.process(
-                        InputImage.fromMediaImage(image, proxy.imageInfo.rotationDegrees),
-                    )
-                        .addOnSuccessListener { barcodes ->
-                            barcodes.firstNotNullOfOrNull { it.rawValue }?.let(onText)
-                        }
-                        .addOnCompleteListener { proxy.close() }
                 }
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
