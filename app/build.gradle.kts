@@ -52,6 +52,9 @@ dependencies {
     implementation(libs.camerax.view)
     implementation(libs.mlkit.barcode)
 
-    testImplementation(kotlin("test"))
+    // Not kotlin("test"): AGP 9 supplies Kotlin without the standalone
+    // plugin, so neither the version nor the framework variant gets
+    // resolved for us. Naming the JUnit variant does both.
+    testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.ktor.client.mock)
 }
