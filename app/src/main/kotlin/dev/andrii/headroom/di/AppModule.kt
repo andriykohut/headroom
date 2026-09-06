@@ -24,6 +24,8 @@ import dev.andrii.headroom.store.KeystoreSecureStore
 import dev.andrii.headroom.store.SecureStore
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import dev.andrii.headroom.ui.UsageViewModel
+import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("headroom")
@@ -40,6 +42,7 @@ val appModule = module {
     single<Notifier> { AndroidNotifier(get()) }
     single<AlarmScheduler> { AndroidAlarmScheduler(get()) }
     single { TriggerEvaluator() }
+    viewModel { UsageViewModel(get(), get(), get()) }
     single {
         NotificationCoordinator(
             fetch = { atWall -> get<UsageApi>().fetch(atWall) },

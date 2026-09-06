@@ -17,6 +17,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Headroom">
 
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <receiver
             android:name=".schedule.AlarmReceiver"
             android:exported="false" />
