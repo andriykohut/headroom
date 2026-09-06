@@ -67,8 +67,8 @@ See [`docs/superpowers/specs/2026-09-04-headroom-design.md`](docs/superpowers/sp
 for the design and [`docs/discovery-notes.md`](docs/discovery-notes.md) for what
 was verified against a live install, and when.
 
-One thing remains unverified: whether a phone camera actually scans the QR off a
-terminal. That needs a device and the app, so it is checked when the app exists.
+The QR has been scanned off a terminal with a phone's built-in camera, and
+`/headroom-link` works from a clone of this repo.
 
 App implementation targets a machine with the Android toolchain installed (JDK,
 Android SDK, Gradle).

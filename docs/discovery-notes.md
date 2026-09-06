@@ -119,9 +119,15 @@ Error correction stays at L deliberately. The payload is two 108-character
 tokens plus a UUID and two URLs; raising correction raises the version, and the
 symbol is already at the edge of what a phone reads off a screen.
 
-**Still unverified: whether a phone camera actually scans it.** That needs a
-physical device pointed at a terminal, and it is the one thing that decides
-whether `--text` should be the documented default rather than the fallback.
+**Scanned first try** on 2026-09-06, with a phone's built-in camera app pointed
+at a terminal wider than 85 columns. No fiddling with distance, angle, or font
+size was needed. So the QR stays the primary path and `--text` stays the
+fallback, which is what the spec's onboarding order assumes.
+
+Two caveats on that result. It is one phone against one terminal at one font
+size, so it establishes that the geometry works rather than that it always
+will; and it says nothing about a *narrower* window, where the code wraps and
+silently stops being a QR at all — which is why the width check exists.
 
 ## How to re-verify
 
