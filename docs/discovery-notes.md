@@ -101,6 +101,28 @@ The `HEADROOM_CLIENT_ID` / `HEADROOM_TOKEN_ENDPOINT` / `HEADROOM_USAGE_ENDPOINT`
 environment overrides in Task 7 are the escape hatch for when this scan stops
 working, which it eventually will. They are the supported path, not a debug aid.
 
+## QR density
+
+Measured against a real payload on 2026-09-06:
+
+| | |
+| --- | --- |
+| Payload | 469 characters |
+| QR | version 15, 77×77 modules, error correction L |
+| Terminal footprint | **85 columns × 43 rows** (segno, `compact=True`) |
+
+**85 columns is wider than the 80-column default**, and a QR that wraps looks
+like a QR while being unscannable. The CLI therefore compares the drawing's
+width against `shutil.get_terminal_size()` and warns, pointing at `--text`.
+
+Error correction stays at L deliberately. The payload is two 108-character
+tokens plus a UUID and two URLs; raising correction raises the version, and the
+symbol is already at the edge of what a phone reads off a screen.
+
+**Still unverified: whether a phone camera actually scans it.** That needs a
+physical device pointed at a terminal, and it is the one thing that decides
+whether `--text` should be the documented default rather than the fallback.
+
 ## How to re-verify
 
 The scan is cheap to redo after a Claude Code upgrade:
