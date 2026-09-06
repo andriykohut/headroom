@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Compose paints everything, so this theme only has to be a no-action-bar
+      window shell. The plan named Theme.Material3.DayNight.NoActionBar, which
+      lives in the Material Components *view* library - a dependency a
+      Compose-only app has no other use for. A platform theme costs nothing and
+      pulls in nothing; values-night/ supplies the dark variant.
+    -->
+    <style name="Theme.Headroom" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+</resources>
