@@ -15,6 +15,19 @@ val keystoreProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Obtainium decides whether an update exists by comparing versionName between
+// releases, so a tagged build has to carry the tag's version rather than
+// whatever was last hardcoded here. Local builds keep the fallback.
+val taggedVersion: String? = System.getenv("GITHUB_REF_NAME")
+    ?.removePrefix("v")
+    ?.takeIf { Regex("""^\d+\.\d+\.\d+$""").matches(it) }
+
+val appVersionName: String = taggedVersion ?: "0.1.0"
+
+val appVersionCode: Int = appVersionName.split(".").let { parts ->
+    parts[0].toInt() * 10_000 + parts[1].toInt() * 100 + parts[2].toInt()
+}
+
 android {
     namespace = "dev.andrii.headroom"
     compileSdk = 37
@@ -23,8 +36,8 @@ android {
         applicationId = "dev.andrii.headroom"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     signingConfigs {

@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build, e.g. v0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish a signed APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A release must clear the same bar as any other build, and then some:
+      # this artifact is the one strangers install.
+      - run: ./scripts/check-distribution.sh
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the compile SDK
+        run: sdkmanager --install "platforms;android-37.2" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test
+        run: ./gradlew :domain:test :app:testDebugUnitTest
+
+      - name: Restore the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "No signing key configured. See docs/releasing.md." >&2
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > headroom-release.keystore
+          {
+            echo "storeFile=headroom-release.keystore"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+
+      - name: Build the release APK
+        run: ./gradlew :app:assembleRelease
+
+      # Obtainium tracks a repository's releases and matches assets by name, so
+      # the name has to be stable across releases and carry the version.
+      - name: Name the artifact
+        id: artifact
+        run: |
+          version="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          name="headroom-${version}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify what is about to be published
+        run: |
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          "$apksigner" verify --print-certs "${{ steps.artifact.outputs.name }}"
+          aapt2=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
+          # A release build must not be debuggable: this app holds a live
+          # credential, and a debuggable one hands it to anyone with adb.
+          if "$aapt2" dump xmltree "${{ steps.artifact.outputs.name }}" \
+               --file AndroidManifest.xml | grep -qi 'debuggable'; then
+            echo "Refusing to publish a debuggable release APK." >&2
+            exit 1
+          fi
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.artifact.outputs.version }}
+          files: ${{ steps.artifact.outputs.name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Remove the signing key from the runner
+        if: always()
+        run: rm -f headroom-release.keystore keystore.properties
