@@ -113,42 +113,64 @@ the credential lived in the macOS Keychain — so `CredentialFileResolver` is
 tested against the JSON shape found there, on the assumption that the file holds
 the same blob. Reasonable, unconfirmed.
 
-### Headroom cannot have its own OAuth client identity
+### Headroom cannot run its own OAuth flow
 
-Tested 2026-09-06, and recorded so nobody spends the afternoon again.
+Tested exhaustively on 2026-09-06, and written down because it looks
+achievable right up until you try it.
 
-Claude Code's `client_id` is a URL —
-`https://claude.ai/oauth/claude-code-client-metadata` — which serves a genuine
-OAuth **client ID metadata document** (`client_name: "Claude Code"`,
-`token_endpoint_auth_method: none`). That strongly suggests a server which
-fetches any such document, letting a third-party client identify itself
-honestly.
+**Why it matters.** Headroom copies Claude Code's credential, so the two share
+one refresh token. Refresh tokens rotate, so whichever client refreshes second
+finds its token spent and reports "Re-link needed". The fix would be for
+Headroom to run its own authorization and hold its own tokens - which is what
+`hass-claude-usage` does, and why that project does not have this problem.
 
-**It does not.** An authorize request carrying that URL as `client_id` is
-rejected before any lookup:
+**It cannot have its own client identity.** Claude Code's `client_id` is a URL
+serving a genuine OAuth client ID metadata document (`client_name: "Claude
+Code"`), which suggests a server that would let a third-party client identify
+itself honestly. It does not: an authorize request carrying that URL is
+rejected with
 
 > `client_id: Input should be a valid UUID, invalid character: expected an
 > optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `h` at 1`
 
-The endpoint validates `client_id` as a UUID and never fetches anything. That
-document belongs to some other flow. There is also no OAuth server metadata
-published — `/.well-known/oauth-authorization-server` is 404 on `claude.ai`,
-`platform.claude.com` and `console.anthropic.com` — so there is nothing to
-discover and no registration endpoint.
+before anything is fetched. No OAuth server metadata is published either -
+`/.well-known/oauth-authorization-server` is 404 on `claude.ai`,
+`platform.claude.com` and `console.anthropic.com` - so there is no registration
+endpoint. A client ID can only come from Anthropic issuing one.
 
-**Consequences.** A third-party tool has exactly two options: copy an existing
-credential (what Headroom does, at the cost of periodic re-linking), or run a
-PKCE flow using Claude Code's own client ID (what `hass-claude-usage` does,
-which fixes the token collision but shows "Claude Code" on the consent screen
-for software that is not Claude Code). The narrower `user:profile` scope is
-only available on the second path.
+**And borrowing Claude Code's client ID does not work either.** Nine variants
+were tried, using Claude Code's own UUID. All reached a consent screen and then
+failed identically at code issuance with **"Authorization failed / Invalid
+request format"**:
 
-**What would change this:** Anthropic issuing a client ID, or opening
-registration. The ask is small and specific, and worth making before assuming
-the answer.
+| Varied | Values tried |
+| --- | --- |
+| Authorize host | `claude.ai/oauth/authorize`, `platform.claude.com/oauth/authorize` |
+| Redirect | `console.anthropic.com/oauth/code/callback`, `platform.claude.com/oauth/code/callback`, `http://localhost/callback` |
+| Scope | `user:profile`, `org:create_api_key user:profile user:inference` |
+| Mode | with and without `code=true` |
 
-Note also that `/oauth/authorize` sits behind a bot challenge, so this can only
-be tested from a real browser.
+The consent screen rendering means `client_id`, `scope` and the PKCE challenge
+are all accepted; the failure is at code issuance. `platform.claude.com`
+additionally shows an organisation picker, so that host is the console/org
+flow rather than the consumer subscription one.
+
+Notably, one of those variants reproduces `hass-claude-usage`'s request exactly
+- same host, redirect, scope and parameters - and it fails too. **That project
+is very likely broken right now** (last commit 2026-08-28, no issue filed yet).
+Worth telling them.
+
+**What we learned that is still useful:** `user:profile` alone is sufficient for
+the usage endpoint - `hass` issue #13 confirms the metrics pull fine with the
+other two scopes dropped. If this flow is ever fixed, that is the scope to ask
+for, and it is much narrower than the three Claude Code's credential carries.
+
+**What would change this:** Anthropic issuing a client ID, opening
+registration, or the authorization flow starting to work again. Until then,
+periodic re-linking is a property of the design and the README says so.
+
+Note that `/oauth/authorize` sits behind a bot challenge, so any retest needs a
+real browser.
 
 ## Watch for drift
 
