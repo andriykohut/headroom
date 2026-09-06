@@ -118,9 +118,18 @@ class UsageApi(
     }
 
     private companion object {
-        /** Longer than the 20-minute poll, so a hold outlasts the next tick. */
-        const val DEFAULT_BACKOFF = 1_800L
-        /** A server asking for more than this is treated as asking for this. */
-        const val MAX_BACKOFF = 6 * 3_600L
+        /**
+         * Six hours, not the half hour this used to be.
+         *
+         * The penalty for hitting this endpoint too hard has been reported at
+         * around twenty-four hours, and it does not only affect this app - it
+         * blocks usage in Claude Code and on the web too. Retrying hourly into
+         * a day-long ban buys nothing and risks extending it, so when the
+         * server does not say how long to wait, waiting properly is cheaper
+         * than guessing short.
+         */
+        const val DEFAULT_BACKOFF = 6 * 3_600L
+        /** A server asking for longer than a day is treated as asking for a day. */
+        const val MAX_BACKOFF = 24 * 3_600L
     }
 }

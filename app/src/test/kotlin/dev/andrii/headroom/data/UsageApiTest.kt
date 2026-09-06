@@ -183,9 +183,10 @@ class UsageApiTest {
         val e = assertFailsWith<RateLimitedException> {
             api(engine, FakeCredentialStore(credential)).fetch()
         }
-        // The periodic poll is every 20 minutes; a shorter hold would let the
-        // very next tick walk straight back into the limit.
-        assertTrue(e.retryAtEpochSeconds - 1_787_000_000 > 20 * 60)
+        // The observed penalty for over-polling this endpoint is around a day,
+        // and it blocks Claude Code and the web UI too - so a hold measured in
+        // minutes would spend the whole ban retrying into it.
+        assertTrue(e.retryAtEpochSeconds - 1_787_000_000 >= 6 * 3_600)
     }
 
     @Test

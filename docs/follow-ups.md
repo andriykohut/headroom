@@ -59,13 +59,15 @@ with the server. It does not prove both agree with what Claude Code's own
 
 ### The rate-limit backoff numbers are guesses
 
-A 429 now parks the app until `Retry-After` says otherwise, or for 30 minutes
-if the server does not say — longer than the 20-minute poll, so a hold always
-outlasts the next tick. Both numbers were chosen rather than measured; nobody
-knows what the endpoint's actual limit is, or over what window.
+A 429 now parks the app until `Retry-After` says otherwise, or for six hours
+if the server does not say.
 
-**How to settle it:** find out what the limit is. Until then the 30 minutes is
-a safe guess rather than a right one.
+**How to settle it:** find out what the limit is. The one public data point
+comes from `hass-claude-usage`, whose README reports that "a couple of dozen
+bursts in a minute" triggers it and that the penalty is "around 24 hours,
+during which you won't be able to see your usage here, in Claude Code, or on
+https://claude.ai". The default backoff is six hours on that basis, and the cap
+is a day; both are still estimates.
 
 **Also unhandled:** `Retry-After` in its HTTP-date form. Only delta-seconds is
 read; a date falls back to the default. Legal per the spec, never observed
@@ -110,6 +112,43 @@ unverified in the meantime.
 the credential lived in the macOS Keychain — so `CredentialFileResolver` is
 tested against the JSON shape found there, on the assumption that the file holds
 the same blob. Reasonable, unconfirmed.
+
+### Headroom cannot have its own OAuth client identity
+
+Tested 2026-09-06, and recorded so nobody spends the afternoon again.
+
+Claude Code's `client_id` is a URL —
+`https://claude.ai/oauth/claude-code-client-metadata` — which serves a genuine
+OAuth **client ID metadata document** (`client_name: "Claude Code"`,
+`token_endpoint_auth_method: none`). That strongly suggests a server which
+fetches any such document, letting a third-party client identify itself
+honestly.
+
+**It does not.** An authorize request carrying that URL as `client_id` is
+rejected before any lookup:
+
+> `client_id: Input should be a valid UUID, invalid character: expected an
+> optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `h` at 1`
+
+The endpoint validates `client_id` as a UUID and never fetches anything. That
+document belongs to some other flow. There is also no OAuth server metadata
+published — `/.well-known/oauth-authorization-server` is 404 on `claude.ai`,
+`platform.claude.com` and `console.anthropic.com` — so there is nothing to
+discover and no registration endpoint.
+
+**Consequences.** A third-party tool has exactly two options: copy an existing
+credential (what Headroom does, at the cost of periodic re-linking), or run a
+PKCE flow using Claude Code's own client ID (what `hass-claude-usage` does,
+which fixes the token collision but shows "Claude Code" on the consent screen
+for software that is not Claude Code). The narrower `user:profile` scope is
+only available on the second path.
+
+**What would change this:** Anthropic issuing a client ID, or opening
+registration. The ask is small and specific, and worth making before assuming
+the answer.
+
+Note also that `/oauth/authorize` sits behind a bot challenge, so this can only
+be tested from a real browser.
 
 ## Watch for drift
 

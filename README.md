@@ -4,7 +4,7 @@
 
 **How much Claude subscription capacity you have left — on your phone, without your computer.**
 
-[![CI](https://github.com/USER/headroom/actions/workflows/ci.yml/badge.svg)](https://github.com/USER/headroom/actions/workflows/ci.yml)
+[![CI](https://github.com/andriykohut/headroom/actions/workflows/ci.yml/badge.svg)](https://github.com/andriykohut/headroom/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-12%2B-3E5C76)](#installing)
 
@@ -122,9 +122,17 @@ Three things you should know before using it, stated plainly:
   the only way the credential you have can be renewed. This is the thing
   Anthropic could most reasonably object to, so it is said here rather than
   buried in a design document.
-- **It may sign out Claude Code on your computer** (and vice versa), because
-  refreshing rotates a token the two of you share. If that happens, re-link —
-  it is one command.
+- **You will have to re-link periodically.** Headroom uses a copy of Claude
+  Code's credential, and refresh tokens rotate: whichever client refreshes
+  second finds its token already spent, and shows "Re-link needed". Your phone
+  cannot write a new token back to your computer, so this is a property of the
+  design rather than a bug. Re-linking is one command.
+
+  The fix would be for Headroom to run its own authorization and hold its own
+  token. That needs an OAuth client ID, and this authorization server only
+  accepts UUIDs issued by Anthropic — there is no self-service registration, so
+  a third-party tool cannot obtain one. See
+  [`docs/follow-ups.md`](docs/follow-ups.md).
 
 Nothing leaves your phone except requests to the two endpoints in your QR code.
 No analytics, no crash reporting, no third-party service. See
