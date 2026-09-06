@@ -129,6 +129,40 @@ size, so it establishes that the geometry works rather than that it always
 will; and it says nothing about a *narrower* window, where the code wraps and
 silently stops being a QR at all — which is why the width check exists.
 
+## The usage response
+
+Fetched 2026-09-06, HTTP 200, 1925 bytes. Spec §2's original "Response shape"
+was written from reading Claude Code's client code rather than from a live
+response, and it was wrong in almost every particular:
+
+| §2 predicted | Actually |
+| --- | --- |
+| Top level is an array of entries | Top level is an object; entries are under `limits` |
+| Field `utilization` | Field `percent`, an integer 0–100 |
+| `resets_at` in epoch seconds | `resets_at` as an ISO-8601 string with offset |
+| Kinds `five_hour`, `seven_day`, `seven_day_sonnet`, `seven_day_opus`, `seven_day_overage_included`, `overage` | Kinds `session`, `weekly_all`, `weekly_scoped` |
+| — | Also `group`, `severity`, `is_active` |
+| `scope.model.display_name` for `weekly_scoped` | Correct — the only prediction that held |
+
+The predicted kind names do exist, but as **top-level keys of a second, older
+shape** carrying `{utilization: float, resets_at, limit_dollars, …}`. On the
+verified account most of those were `null` while `limits` was populated, so
+`limits` is the live shape. That is almost certainly how the wrong spec arose:
+those names are visible in the client code, and they look like the answer.
+
+**What the fixture deliberately omits.** The full response also carries a
+`spend` block with real amounts, an `extra_usage` block, and about ten keys that
+read as unreleased product codenames. None of it is anything the app parses, and
+this repo is public, so the committed fixture is the `limits` array alone — with
+`display_name` replaced by a placeholder and `resets_at` normalised to fixed
+stamps in the identical format, which also makes the parser tests deterministic.
+
+Re-fetch the shape (never commit the output) with:
+
+```bash
+uv run --directory tools headroom-link --text | <your own inspector>
+```
+
 ## How to re-verify
 
 The scan is cheap to redo after a Claude Code upgrade:

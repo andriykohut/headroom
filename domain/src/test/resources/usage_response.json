@@ -1,0 +1,37 @@
+{
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 23,
+      "severity": "normal",
+      "resets_at": "2026-09-06T18:00:00.876755+00:00",
+      "scope": null,
+      "is_active": true
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 12,
+      "severity": "normal",
+      "resets_at": "2026-09-09T00:00:00.876755+00:00",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 7,
+      "severity": "normal",
+      "resets_at": "2026-09-09T00:00:00.876755+00:00",
+      "scope": {
+        "model": {
+          "id": null,
+          "display_name": "Example Model"
+        },
+        "surface": null
+      },
+      "is_active": false
+    }
+  ]
+}
