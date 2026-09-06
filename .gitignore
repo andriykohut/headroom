@@ -27,3 +27,6 @@ __pycache__/
 
 # Harness-managed git worktrees
 .claude/worktrees/
+
+# Generated planning documents; kept locally, not published
+docs/superpowers/
