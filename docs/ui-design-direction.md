@@ -5,6 +5,11 @@ It fits the behaviour and state handling those tasks define; where it asks for
 something the plan does not have, §12 lists it. Everything here is expressed in
 Material 3 terms so it maps onto Compose without interpretation.
 
+The rendered version of this document is `docs/ui-mockup.html` — thirteen
+phone renders, light and dark, every state below, self-contained with the
+typeface embedded. Where the two disagree the mockup is the look and this
+document is the reasoning; both were revised together.
+
 Read with: spec §1 (purpose), §2 (the live response shape, verified
 2026-09-06 — an earlier draft of this document was designed against the
 superseded shape), §5 (triggers), §7 (nothing fails silently), and the real
@@ -15,9 +20,12 @@ What the design consumes per limit entry, in wire terms: `kind` (`session`,
 `weekly`, or anything new), `percent` (integer 0–100, percent used),
 `severity` (string; `normal` observed), `resets_at` (ISO-8601 with offset),
 `scope.model.display_name` (for `weekly_scoped`), and `is_active` (boolean).
-Plus one domain-level boolean, `rejected`, which the parser derives — the
-design does not care from which wire field, only that it is true exactly when
-the server says requests are being refused.
+There is no rejection flag anywhere in the response, and the app never makes
+a request that could be refused, so it cannot observe one. The wall is
+therefore defined by the only signal the data can produce: **fully used**,
+`percent >= 100` (`TriggerEvaluator.FULLY_USED` in the domain). Every
+"wall" below means exactly that, and the copy says "used up" and "lifts",
+never "rejected".
 
 ## 1. Point of view
 
@@ -48,7 +56,7 @@ listed take the M3 defaults for that scheme.
 | `onPrimary` | `#FFFFFF` | `#0A3350` | |
 | `primaryContainer` | `#D3E4F8` | `#254566` | Not used on the meter; available for the linked-account row |
 | `onPrimaryContainer` | `#0D2136` | `#D3E4F8` | |
-| `tertiary` | `#7A5900` | `#F2BE4A` | Approaching: bar fill, number, status word |
+| `tertiary` | `#8F6300` | `#F2BE4A` | Approaching: bar fill, number, status word. The light value is the brightest amber that still clears 4.5:1 for the 14sp status word on `surface` and 3:1 as a fill on the track; a prettier gold fails both |
 | `onTertiary` | `#FFFFFF` | `#402D00` | |
 | `tertiaryContainer` | `#FFDF9E` | `#5C4300` | Unused by default; reserved for the approaching state if a container is ever needed |
 | `error` | `#B3261E` | `#F2B8B5` | Wall: hatch lines, number, status word; the re-link panel title |
@@ -77,7 +85,7 @@ Rules that keep the palette honest:
 Colour is the fastest cue, so it is used, but every state also differs in
 **form**, **weight** and **words**:
 
-| | Fine | Approaching (`percent >= threshold`, not rejected) | Wall (`rejected == true`) |
+| | Fine (`percent < threshold`) | Approaching (`threshold <= percent < 100`) | Wall (`percent >= 100`, fully used) |
 | --- | --- | --- | --- |
 | Fill | solid `primary`, stops short of the notch | solid `tertiary`, past the notch | full-width `errorContainer` with 45° `error` hatch lines |
 | Notch | visible ahead of the fill | visible behind the fill | visible, inside the hatch |
@@ -89,11 +97,15 @@ So at a glance: approaching makes *how much* loud; the wall makes *when* loud.
 That difference holds in greyscale, and it holds for a `weekly_scoped` bucket
 with a 30-character model name just as well as for the hero.
 
-Edge: `percent == 100` with `rejected == false` renders as approaching (full
-solid `tertiary` fill) with the status line "At limit, resets in …". The hatch
-is reserved for the server saying rejected. The server's own `severity` never
-changes which of the three states a bar is in — see §5 for why, and for what
-it does instead.
+The three states partition 0–100 exactly: below the threshold, at or above
+it, and at 100. There is no fourth state. An earlier draft kept a solid
+tertiary "At limit" bar for 100% and reserved the hatch for a server-side
+rejection flag; that flag does not exist in the live shape, so "fully used"
+*is* the wall, and 100% hatches. The status word is "Limit reached" (the
+notification title's wording) and the countdown is phrased "Lifts in" (the
+notification body's), so screen and notification say the same thing. The
+server's own `severity` never changes which of the three states a bar is in —
+see §5 for why, and for what it does instead.
 
 ## 3. Typography
 
@@ -112,9 +124,9 @@ actually guarantees stability, whatever the font supports.
 
 | Element | Slot | Weight | Colour |
 | --- | --- | --- | --- |
-| Hero number ("42") | `displayLarge` (57sp), letter-spacing −1sp | 400 / 700 on alert | `onSurface` / status colour |
-| Hero "%" | `headlineMedium`, same baseline as the digits | as the digits | as the digits |
-| Hero "used" | `labelLarge`, baseline-aligned, 6dp after the "%" | 400 | `onSurfaceVariant` |
+| Hero number ("23") | `displayLarge.copy(fontSize = 72.sp, lineHeight = 80.sp, letterSpacing = (-2.5).sp)` — larger than the M3 slot on purpose: three bars leave air, and the number is what should fill it | 400 / 700 on alert | `onSurface` / status colour |
+| Hero "%" | `headlineLarge` (32sp), same baseline as the digits, 3dp after them | as the digits | as the digits |
+| Hero "used" | `bodyMedium`, baseline-aligned, 10dp after the "%" | 400 | `onSurfaceVariant` |
 | Hero title ("Current session") | `titleMedium` | 600 | `onSurface` |
 | Compact number ("67%") | `headlineSmall` (24sp) | 400 / 700 on alert | `onSurface` / status colour |
 | Compact title | `bodyLarge` | 400 | `onSurface` |
@@ -168,8 +180,9 @@ All models                                    67%  bodyLarge · headlineSmall, r
                                                    ↕ 6dp
 ████████████████████████████░░░░░░░ ░░░░           track 8dp tall
                                     ^ notch
-                                                   ↕ 6dp
-Resets in 3d 4h                                    bodyMedium onSurfaceVariant
+                                                   (no reset line in the fine state — the band header carries it, §5)
+                                                   ↕ 8dp, only when a status line is present:
+Near limit, resets Wed 02:00                       bodyMedium onSurfaceVariant, status word 600 in the status colour
 ```
 
 Anatomy and rules:
@@ -236,6 +249,13 @@ unit test against the committed fixture:
   limit); only an unrecognised `group` earns a new band, and the band's
   header is the group string itself, sentence-cased if it is a single word,
   otherwise verbatim.
+- Reset time, once per band. When every entry in a band shares `resets_at`
+  (the fixture's two weekly entries do), the band header carries it on the
+  right — "Resets Wed 02:00", `bodySmall` `onSurfaceVariant`, local time as
+  weekday + `HH:mm` — and the rows carry no reset line of their own. A band
+  whose entries disagree shows the time per row instead, in the row's status
+  line. The session hero always keeps its own countdown ("Resets in 2h 14m"):
+  hours away, relative is the right grain; days away, a clock time is.
 - Titles: the hero keeps "Current session". Compact rows show a
   `displayLabel(bucket)`: inside "This week", a title of the form
   `Current week (X)` shows as `X` (so `weekly_all` reads "All models" and a
@@ -272,16 +292,17 @@ observed only as `normal`, and the two can disagree in both directions:
 | --- | --- | --- | --- |
 | 95 ≥ 90 | `normal` | approaching (tertiary) | nothing |
 | 75 < 90 | something other than `normal` | fine (primary) | a hint line |
-| any | whatever the parser maps to `rejected` | wall (hatched) | nothing — the wall says it |
+| 100 | anything | wall (hatched) | nothing — the wall says it |
+| 60 < 90 | `normal` | fine (primary) | nothing |
 
-The picture always follows the user's number; the server's disagreement
-becomes words, never a second colour system. Concretely: any `severity` the
-parser does not recognise as `normal` or as the wall is rendered as a hint
-line under the status line, `bodySmall` `onSurfaceVariant`, in the same slot
-the unknown-kind hint uses: "Server flags this limit as <value>." — value
-verbatim. Nothing is dropped silently (§7), and nothing contradicts the
-notch. Which `severity` value(s) mean "rejected" is the parser's decision
-(§12); the design only consumes the resulting boolean.
+The picture always follows the user's number and the 100% line; the server's
+disagreement becomes words, never a second colour system. Concretely: any
+`severity` other than `normal` is rendered as a hint line under the status
+line, `bodySmall` `onSurfaceVariant`, in the same slot the unknown-kind hint
+uses: "Server flags this limit as <value>." — value verbatim. It is a hint
+even at the wall, where it is suppressed only because the hatch already says
+everything a hint could. Nothing is dropped silently (§7), and nothing
+contradicts the notch. `severity` is never mapped to a state (§12).
 
 ## 6. Usage screen, state by state
 
@@ -295,20 +316,18 @@ Layout skeleton, portrait, 360dp wide:
 │ 42% used                               │  hero block
 │ ████████████████░░░░░░░░░░ ░░░░░       │
 │ Resets in 2h 14m                       │
-│                                        │  ↕ 32dp
-│ This week                              │  group header
-│                                        │  ↕ 12dp
+│                                        │  ↕ 36dp
+│ This week            Resets Wed 02:00  │  band header: titleSmall left, bodySmall right (shared reset time)
+│                                        │  ↕ 14dp
 │ All models                       67%   │
-│ ████████████████████████░░ ░░░         │
-│ Resets in 3d 4h                        │
+│ ████████████████████████░░ ░░░         │  no reset line: the header already said it
 │                                        │  ↕ 20dp between compact bars
 │ Opus                             91%   │  ← bold, tertiary
 │ ████████████████████████████████ ██░   │  ← tertiary fill, past the notch
-│ Near limit, resets in 3d 4h            │
+│ Near limit, resets Wed 02:00           │  ← a status line appears only when there is status
 │                                        │
 │ Sonnet                           12%   │
 │ █████░░░░░░░░░░░░░░░░░░░░░ ░░░         │
-│ Resets in 3d 4h                        │
 └────────────────────────────────────────┘
 ```
 
@@ -556,7 +575,7 @@ as a form.
 │   ○────────────────────────●───○       │  Slider 50..99, steps = 48, full width, inset 16dp left
 │                                        │
 │ Limit reached                     (●)  │
-│ When requests start being rejected     │
+│ When a limit is fully used             │
 │                                        │
 │                                        │  (flexible space)
 │ Linked account                         │  titleSmall onSurfaceVariant
@@ -581,7 +600,7 @@ omitted, the screen ends after the last row.
 - 4dp grid. Screen horizontal padding 20dp on compact widths. Content column
   capped at 560dp and centred on anything wider (tablets, unfolded foldables);
   no second column.
-- Vertical rhythm on Usage: age line → 24dp → hero → 32dp → group header →
+- Vertical rhythm on Usage: age line (48dp row) → 16dp → hero → 36dp → band header →
   12dp → first compact bar → 20dp between bars → 32dp before the next group →
   24dp bottom padding plus navigation-bar insets. Panels sit 16dp below the
   age line and 24dp above the hero.
@@ -609,7 +628,7 @@ omitted, the screen ends after the last row.
 | Bar | custom `@Composable UsageBar(bucket, threshold, now, hero: Boolean, dimmed: Boolean)` drawing with `Canvas`; `animateFloatAsState` on the fraction |
 | Hatch | `clipPath(roundedRectPath) { repeat(...) { drawLine(error, start, end, strokeWidth = 2.dp.toPx()) } }` |
 | Notch | after drawing track and fill, `drawRect(surface, topLeft = Offset(x - 1.dp.toPx(), 0), size = Size(2.dp.toPx(), height))` |
-| Hero number | `Text(buildAnnotatedString { digits in displayLarge; "%" in headlineMedium })` beside `Text("used", labelLarge)`, `alignByBaseline()` |
+| Hero number | `Text(buildAnnotatedString { digits at 72.sp; "%" in headlineLarge })` beside `Text("used", bodyMedium)`, `alignByBaseline()` |
 | Panels | `Surface(shape = shapes.large, color = …)` — not `Card`; no elevation, no border |
 | Age line + actions | `Row` with `Text(weight(1f))`, `IconButton(Refresh)`, `IconButton(Settings)` |
 | Top bars (Import, Settings) | `TopAppBar(title, navigationIcon = IconButton(ArrowBack))` |
@@ -648,7 +667,8 @@ plan's code does not have, or reverses a rendering choice. Each is small.
 2. **`UsageScreen` needs `thresholdPercent: Double`.** The notch is drawn at
    the configured threshold. `MainActivity` reads `SettingsStore.flow` and
    passes it down; the approaching state is computed in the UI as
-   `percent >= threshold && !rejected`, matching `TriggerEvaluator`.
+   `percent >= threshold && percent < 100`, and the wall as `percent >= 100`,
+   matching `TriggerEvaluator`'s threshold and `FULLY_USED` rules.
 3. **Hard-coded green/amber/red → theme roles.** The plan's `barColour`
    mirrors the terminal statusline (60/85 breakpoints). This design keys the
    colour change to the user's own threshold instead, so the bar, the notch
@@ -684,26 +704,40 @@ these are what the design needs from the rewritten domain):
 
 11. **`LimitBucket` must carry `group: String`, `severity: String` and
     `isActive: Boolean`** alongside `kind`, `title`, `percent: Int`,
-    `resetsAt` (epoch seconds, parsed from the ISO-8601 string) and
-    `rejected`. `group` drives the bands (§5); `severity` feeds the hint line;
-    `isActive` is stored but unused (§5). Keep the raw `kind` string even for
-    recognised kinds, as before, so an unrecognised one can be shown verbatim.
-12. **`rejected` is the parser's call, not the UI's.** The old shape had a
-    `status: "rejected"` field; the new one does not, and spec §5's "status
-    transitions into rejected" now has to be read from `severity` (values
-    other than `normal` are unobserved) or from the `at_wall=1` variant's
-    response. The design consumes the boolean; whichever wire signal the
-    parser picks, `percent == 100` alone must *not* set it — that case
-    renders as "At limit" in tertiary, not as the hatched wall.
+    and `resetsAt` (epoch seconds, parsed from the ISO-8601 string). The
+    domain built against the live shape has all of these (`utilization` is
+    the `percent` field widened to a Double, which is fine — the UI renders
+    `toInt()`). `group` drives the bands (§5); `severity` feeds the hint
+    line; `isActive` is stored but unused (§5). Keep the raw `kind` string
+    even for recognised kinds, as before, so an unrecognised one can be shown
+    verbatim.
+12. **The wall is "fully used", not "rejected" — and there is no `rejected`
+    flag.** An earlier draft of this document asked the parser to derive one
+    from `severity` or from the `at_wall=1` response, and reserved the hatch
+    for it. That was unreachable: the live response carries no rejection
+    field (the plan's `status: "rejected"` never existed), `severity` has
+    only ever been observed as `normal` so any mapping from it would be the
+    same inference that made spec §2 wrong, and `at_wall=1` is what Claude
+    Code sends *after its own request was refused* — Headroom never sends a
+    request that could be, so it can never learn this. The domain therefore
+    keys the wall on `percent >= 100` (`FULLY_USED`), the notification says
+    the limit is used up and when it lifts, and a test asserts it never
+    claims requests are being rejected. The design follows: 100% hatches,
+    the status word is "Limit reached", the countdown is "Lifts in". If a
+    real at-the-wall response is ever captured and carries a genuine signal —
+    a `severity` value, a new field — the change is confined to the wall
+    predicate in `TriggerEvaluator` and the matching line in §2's state
+    table; nothing in the bar's anatomy, colour or copy moves, because
+    "fully used" and "refused" look and read the same on this screen.
 13. **Unrecognised `severity` must reach the UI as a string**, not be
     collapsed to `normal`, so the §5 hint line can name it.
-14. **Optional, recommended:** because `resets_at` is a real timestamp, weekly
-    windows are better told as a time than a countdown — "Resets Tue 03:00"
-    (local time, `EEE HH:mm` via `DateTimeFormatter.ofLocalizedTime` style
-    short) beats "2d 3h" when the answer is days away. Keep the countdown for
-    the session, where "in 2h 14m" is the right grain. This is a new pure
-    `formatResetTime(resetsAt, now, zone)` beside the plan's `formatCountdown`,
-    with its own test; the status-line wording in §2 and §4 otherwise stands.
+14. **Weekly reset shown as a clock time, once per band.** Because `resets_at`
+    is a real timestamp, a window days away is better told as a time than a
+    countdown: "Resets Wed 02:00" beats "2d 8h". The mockup adopts this (§5):
+    the band header carries the shared time, rows carry none, and the session
+    hero keeps `formatCountdown`. Needs a pure `formatResetTime(resetsAt,
+    zone)` — local weekday plus `HH:mm` — beside the plan's formatter, with its
+    own test, and a `sharedResetsAt(band)` check in `groupBuckets`.
 
 None of these change `UsageState`, `interpretScan`, `clampThreshold`, the
 existing formatters, or any UI test in the plan; items 11–13 are parser and
