@@ -55,6 +55,20 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _terminal_width() -> int | None:
+    """Width of the window this QR will be looked at in, when that is knowable.
+
+    Under a pipe, a redirect, or a tool that runs the command for the user,
+    there is no window to measure - and get_terminal_size() answers anyway,
+    with an 80-column fallback that says nothing about the user's terminal.
+    Treating that guess as fact produces a confident warning about a window
+    nobody is looking at, so it returns None instead.
+    """
+    if not sys.stdout.isatty():
+        return None
+    return shutil.get_terminal_size().columns
+
+
 def _warn_if_too_narrow(drawing: str) -> None:
     """A QR wider than the terminal wraps, and a wrapped QR cannot be scanned.
 
@@ -63,7 +77,16 @@ def _warn_if_too_narrow(drawing: str) -> None:
     never fail silently.
     """
     needed = max((len(line) for line in drawing.splitlines()), default=0)
-    columns = shutil.get_terminal_size().columns
+    columns = _terminal_width()
+    if columns is None:
+        print(
+            f"headroom-link: this QR needs {needed} columns. Output is not "
+            "going to a terminal, so its width cannot be checked - if the "
+            "window showing this is narrower, the code wraps and will not "
+            "scan. Widen it, or use --text and paste instead.",
+            file=sys.stderr,
+        )
+        return
     if needed <= columns:
         return
     print(

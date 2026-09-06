@@ -15,9 +15,12 @@ from https://astral.sh/uv and stop — do not attempt an alternative install pat
 If it fails with a credentials error, relay the error's list of locations tried
 and ask whether Claude Code is logged in on this machine.
 
-If it warns that the QR is wider than the terminal, relay that warning rather
-than showing the wrapped output as if it were scannable: a wrapped QR looks
-right and does not scan. Tell them to widen the window or reduce the font size.
+The command prints the number of columns the QR needs. Run this way it cannot
+measure the user's window, so relay that number rather than showing the output
+as if it were known to be scannable: a wrapped QR looks right and does not
+scan. If it looks wrapped, tell them to widen the window, reduce the font size,
+or run `uv run --directory tools headroom-link` directly in their own terminal,
+where the command checks the width itself.
 
 Never echo the payload or any token into your own response text. The QR output
 is safe to show; the raw `headroom1:` string is not — it grants account access,

@@ -1,5 +1,6 @@
-import os
+import io
 import random
+import re
 import string
 import pytest
 from headroom_link import cli
@@ -64,7 +65,8 @@ def test_expiry_warning_shown_for_already_expired_token(monkeypatch, capsys):
 
 
 def terminal_of_width(columns):
-    return lambda: os.terminal_size((columns, 24))
+    """Stands in for a real terminal; None means "not a terminal at all"."""
+    return lambda: columns
 
 
 # Real Claude Code tokens are 108 characters each and the client_id is a
@@ -103,19 +105,40 @@ def test_warns_when_the_terminal_is_too_narrow_to_draw_the_qr(wired_unexpired, m
     Real payloads need 85 columns, so the common 80-column terminal fails.
     Spec §7: never fail silently.
     """
-    monkeypatch.setattr(cli.shutil, "get_terminal_size", terminal_of_width(80))
+    monkeypatch.setattr(cli, "_terminal_width", terminal_of_width(80))
     cli.main([])
     err = capsys.readouterr().err
     assert "80" in err and "--text" in err
 
 
 def test_no_width_warning_when_the_terminal_is_wide_enough(wired_unexpired, monkeypatch, capsys):
-    monkeypatch.setattr(cli.shutil, "get_terminal_size", terminal_of_width(200))
+    monkeypatch.setattr(cli, "_terminal_width", terminal_of_width(200))
     cli.main([])
     assert capsys.readouterr().err == ""
 
 
 def test_text_output_is_not_subject_to_the_width_warning(wired_unexpired, monkeypatch, capsys):
-    monkeypatch.setattr(cli.shutil, "get_terminal_size", terminal_of_width(40))
+    monkeypatch.setattr(cli, "_terminal_width", terminal_of_width(40))
     cli.main(["--text"])
     assert capsys.readouterr().err == ""
+
+
+def test_states_the_required_width_when_it_cannot_be_measured(wired_unexpired, monkeypatch, capsys):
+    """Piped or run by a tool: there is no window, so claim nothing about one.
+
+    get_terminal_size() would answer 80 regardless, which reads as a
+    confident warning about a terminal nobody is looking at.
+    """
+    monkeypatch.setattr(cli, "_terminal_width", terminal_of_width(None))
+    cli.main([])
+    err = capsys.readouterr().err
+    # The number is whatever this payload draws; the point is that the
+    # requirement is stated without asserting anything about a window.
+    assert re.search(r"needs \d+ columns", err)
+    assert "not going to a terminal" in err
+    assert "warning" not in err
+
+
+def test_width_is_unknown_when_stdout_is_not_a_terminal(monkeypatch):
+    monkeypatch.setattr(cli.sys, "stdout", io.StringIO())
+    assert cli._terminal_width() is None
