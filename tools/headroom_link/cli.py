@@ -8,6 +8,7 @@ import time
 from .payload import encode
 from .provider import ProviderNotFound, resolve_provider
 from .qr import render
+from .relay import relay_payload
 from .resolvers import CredentialNotFound, resolve_tokens
 
 
@@ -23,17 +24,34 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
         "--text", action="store_true",
         help="print the raw payload instead of a QR code (for manual paste)",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--relay", metavar="URL",
+        help="point the phone at a headroom-relay instead of at the provider, "
+             "so no credential leaves this machine",
+    )
+    parser.add_argument(
+        "--relay-secret", metavar="TOKEN",
+        help="the relay's shared secret (required with --relay)",
+    )
+    args = parser.parse_args(argv)
+    if args.relay and not args.relay_secret:
+        parser.error("--relay needs --relay-secret")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse(argv)
-    try:
-        tokens = resolve_tokens()
-        provider = resolve_provider()
-    except (CredentialNotFound, ProviderNotFound) as exc:
-        print(f"headroom-link: {exc}", file=sys.stderr)
-        return 1
+    if args.relay:
+        # Nothing to resolve: the phone is being pointed at a relay, which holds
+        # the credential itself.
+        tokens, provider = relay_payload(args.relay, args.relay_secret)
+    else:
+        try:
+            tokens = resolve_tokens()
+            provider = resolve_provider()
+        except (CredentialNotFound, ProviderNotFound) as exc:
+            print(f"headroom-link: {exc}", file=sys.stderr)
+            return 1
 
     if tokens.expires_at <= time.time():
         print(
