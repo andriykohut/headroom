@@ -26,7 +26,7 @@ class AndroidNotifier(private val context: Context) : Notifier {
         manager.createNotificationChannel(
             NotificationChannel(
                 RELINK_CHANNEL_ID,
-                "Re-link needed",
+                "Your relay refused this phone",
                 NotificationManager.IMPORTANCE_HIGH,
             ),
         )

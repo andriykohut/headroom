@@ -30,3 +30,6 @@ __pycache__/
 
 # Generated planning documents; kept locally, not published
 docs/superpowers/
+
+# Rust build output
+cli/target/

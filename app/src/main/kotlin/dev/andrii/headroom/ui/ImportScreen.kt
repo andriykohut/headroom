@@ -115,7 +115,7 @@ fun ImportScreen(onLinked: (Credential) -> Unit, onCancel: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Link an account") },
+                title = { Text("Link this phone") },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -151,8 +151,9 @@ fun ImportScreen(onLinked: (Credential) -> Unit, onCancel: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "On your computer, run /headroom-link in Claude Code, " +
-                    "or tools/headroom-link from a terminal.",
+                "On your computer, run /headroom-link in Claude Code, or " +
+                    "headroom link from a terminal. The code carries your relay's " +
+                    "address and key - not your Claude account.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

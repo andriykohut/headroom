@@ -1,0 +1,31 @@
+[package]
+name = "headroom"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Push Claude Code usage from your machine to a Headroom relay, and serve it to the phone"
+license = "Apache-2.0"
+repository = "https://github.com/andriykohut/headroom"
+
+[dependencies]
+# Every dependency here is MIT or Apache-2.0. Nothing copyleft, nothing that
+# would complicate F-Droid or the Play Store; scripts/check-distribution.sh
+# checks this.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Blocking HTTP with rustls. Blocking is deliberate: `push` must start, do one
+# request and exit, and an async runtime would cost more than the request.
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+# A blocking HTTP server, so the whole binary stays runtime-free.
+tiny_http = "0.12"
+qrcode = { version = "0.14", default-features = false }
+flate2 = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

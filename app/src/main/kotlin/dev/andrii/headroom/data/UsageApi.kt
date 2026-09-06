@@ -14,7 +14,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.isSuccess
 
-class NotLinkedException : Exception("No account is linked. Scan a code to link Headroom.")
+class NotLinkedException :
+    Exception("This phone isn't linked to a relay yet. Scan a code to link it.")
 
 class UsageFetchException(message: String) : Exception(message)
 
@@ -73,7 +74,7 @@ class UsageApi(
             throw UsageFetchException("Couldn't read usage (HTTP ${response.status.value}).")
         }
         val snapshot = try {
-            UsageParser.parse(response.bodyAsText(), fetchedAt = now())
+            UsageParser.parse(response.bodyAsText(), fetchedAt = readingTakenAt(response))
         } catch (e: UsageParseException) {
             throw UsageFetchException("Usage response wasn't in the expected format: ${e.message}")
         }
@@ -81,6 +82,27 @@ class UsageApi(
         // about whether the limit has expired.
         if (heldUntil != 0L) gate.clear()
         return snapshot
+    }
+
+    /**
+     * When the reading was actually taken - not when we asked for it.
+     *
+     * A relay serves a reading that was pushed to it earlier and reports how
+     * old it is in `X-Headroom-Age`. Dating the snapshot from the moment of
+     * the request would make an hour-old reading fetched a second ago render
+     * as "just now", and never mark it stale. That is precisely the failure
+     * this app exists not to have: showing a number without showing that it is
+     * old.
+     *
+     * Absent or unreadable, the response is assumed to be live, which is
+     * correct for anything that is not a relay.
+     */
+    private fun readingTakenAt(response: HttpResponse): Long {
+        val age = response.headers[HEADROOM_AGE]?.trim()?.toLongOrNull() ?: return now()
+        // A negative age means the two clocks disagree, not that the reading
+        // comes from the future. Treat it as live rather than dating it ahead,
+        // which would make the reading look fresh forever.
+        return now() - age.coerceAtLeast(0)
     }
 
     /**
@@ -118,6 +140,9 @@ class UsageApi(
     }
 
     private companion object {
+        /** How old the served reading is, in seconds. Sent by a relay. */
+        const val HEADROOM_AGE = "X-Headroom-Age"
+
         /**
          * Six hours, not the half hour this used to be.
          *

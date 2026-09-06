@@ -44,7 +44,9 @@ class ImportedCredentialStore(
 
     override suspend fun refresh(): Credential {
         val existing = current()
-            ?: throw RefreshFailedException("No account is linked. Scan a code to link Headroom.")
+            ?: throw RefreshFailedException(
+                "This phone isn't linked to a relay yet. Scan a code to link it.",
+            )
         val response = try {
             httpClient.submitForm(
                 url = existing.tokenEndpoint,

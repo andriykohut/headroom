@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A relay is reached over HTTPS. The phone sends the shared secret on every
+  request, usually across the open internet, so cleartext is refused outright
+  rather than left to the platform default.
+
+  Debug builds replace this file wholesale with src/debug/res/xml/, which does
+  permit cleartext - that is how a laptop relay with no certificate can be
+  paired against. Note that <debug-overrides> cannot express this: it carries
+  trust anchors only, and setting cleartextTrafficPermitted there silently does
+  nothing.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

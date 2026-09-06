@@ -52,6 +52,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // So a debug build installs beside a release one rather than
+            // replacing it. Pairing a test build against a laptop relay should
+            // not cost you the app you actually use.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             // Not debuggable: this build holds a live credential, and a
             // debuggable app lets anyone with adb run code as it and ask the

@@ -254,6 +254,94 @@ class UsageApiTest {
         }
         assertFalse(e.message!!.contains("tok-abc123"))
     }
+
+    // --- how old the reading is (X-Headroom-Age) ---
+
+    /**
+     * A relay serves a reading pushed to it earlier. Dating the snapshot from
+     * the moment of the request would make an hour-old number render as "just
+     * now" and never go stale.
+     */
+    @Test
+    fun `a relay's age header dates the reading, not the request`() = runTest {
+        val now = 1_787_000_000L
+        val engine = MockEngine {
+            respond(
+                BODY, HttpStatusCode.OK,
+                headersOf(
+                    HttpHeaders.ContentType to listOf(ContentType.Application.Json.toString()),
+                    "X-Headroom-Age" to listOf("3600"),
+                ),
+            )
+        }
+        val snapshot = api(engine, FakeCredentialStore(credential), now = now).fetch()
+        assertEquals(now - 3_600, snapshot.fetchedAt)
+    }
+
+    @Test
+    fun `a reading with no age header is treated as live`() = runTest {
+        // Anything that is not a relay answers this way, and it is answering
+        // in real time.
+        val now = 1_787_000_000L
+        val snapshot = api(jsonEngine(), FakeCredentialStore(credential), now = now).fetch()
+        assertEquals(now, snapshot.fetchedAt)
+    }
+
+    @Test
+    fun `an unreadable age header does not blank the reading`() = runTest {
+        val now = 1_787_000_000L
+        val engine = MockEngine {
+            respond(
+                BODY, HttpStatusCode.OK,
+                headersOf(
+                    HttpHeaders.ContentType to listOf(ContentType.Application.Json.toString()),
+                    "X-Headroom-Age" to listOf("not a number"),
+                ),
+            )
+        }
+        val snapshot = api(engine, FakeCredentialStore(credential), now = now).fetch()
+        assertEquals(now, snapshot.fetchedAt, "a bad header must cost the age, not the reading")
+    }
+
+    @Test
+    fun `a negative age is not a reading from the future`() = runTest {
+        // Two clocks disagreeing. Dating the snapshot ahead of now would make
+        // it look fresh indefinitely.
+        val now = 1_787_000_000L
+        val engine = MockEngine {
+            respond(
+                BODY, HttpStatusCode.OK,
+                headersOf(
+                    HttpHeaders.ContentType to listOf(ContentType.Application.Json.toString()),
+                    "X-Headroom-Age" to listOf("-500"),
+                ),
+            )
+        }
+        val snapshot = api(engine, FakeCredentialStore(credential), now = now).fetch()
+        assertEquals(now, snapshot.fetchedAt)
+    }
+
+    @Test
+    fun `an old reading from a relay is stale even though the fetch just happened`() = runTest {
+        // The end of the chain that matters: UsageRepository derives staleness
+        // from fetchedAt, so the header has to reach it for the UI to say so.
+        val now = 1_787_000_000L
+        val engine = MockEngine {
+            respond(
+                BODY, HttpStatusCode.OK,
+                headersOf(
+                    HttpHeaders.ContentType to listOf(ContentType.Application.Json.toString()),
+                    "X-Headroom-Age" to listOf("7200"),
+                ),
+            )
+        }
+        val snapshot = api(engine, FakeCredentialStore(credential), now = now).fetch()
+        val age: Long = now - snapshot.fetchedAt
+        assertTrue(
+            age > UsageRepository.STALE_AFTER_SECONDS,
+            "a two-hour-old relay reading must read as stale",
+        )
+    }
 }
 
 /** Shared test double; the real one is DataStore-backed. */

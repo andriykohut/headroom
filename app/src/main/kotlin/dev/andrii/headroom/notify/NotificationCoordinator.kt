@@ -46,7 +46,7 @@ class NotificationCoordinator(
         } catch (e: RefreshFailedException) {
             // Spec §7: never silent.
             notifier.notifyRelinkNeeded(
-                e.message ?: "Your credentials could not be refreshed. Scan a new code.",
+                e.message ?: "Your relay would not accept this phone's key. Scan a new code.",
             )
             return CycleResult(emptyList(), relinkNeeded = true, nextAlarmAt = null)
         } catch (_: RateLimitedException) {

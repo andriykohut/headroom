@@ -41,7 +41,7 @@ class UsageRepository(
         } catch (e: RefreshFailedException) {
             UsageState.Failed(
                 snapshot = cache.load(),
-                message = e.message ?: "Couldn't refresh your credentials.",
+                message = e.message ?: "Your relay would not accept this phone's key.",
                 needsRelink = true,
             )
         } catch (e: RateLimitedException) {
