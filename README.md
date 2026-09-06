@@ -37,22 +37,38 @@ Code.
 
 Three ways, easiest first:
 
-1. **Claude Code slash command** — `/headroom-link`. Zero install, works on
-   macOS, Linux, and Windows. Renders a QR code in your terminal; scan it.
-2. **Standalone script** — `tools/`, if you would rather not run it through
-   Claude Code. Same output.
-3. **Manual paste** — paste the payload into the app, if you cannot scan.
+1. **Claude Code slash command** — from a clone of this repo, run
+   `/headroom-link`. Renders a QR code in your terminal; scan it with the app.
+2. **Standalone** — `uv run --directory tools headroom-link`. Add `--text` to
+   print the payload for manual paste instead.
+3. **Manual paste** — run with `--text` and paste the string into the app.
+
+Treat the payload like a password: it grants access to your account. Nothing is
+written to disk, and the generators print to your terminal only.
+
+The QR needs a terminal **at least 85 columns wide**. Narrower than that and it
+wraps, which looks like a QR but will not scan — the generator warns you when
+this happens rather than letting you find out by holding up a phone.
 
 Credentials are read from whichever of these your system uses:
 `~/.claude/.credentials.json`, macOS Keychain, `secret-tool` (libsecret), or
-`kwallet`. The generators print to the terminal and write nothing to disk.
+`kwallet`. On macOS the Keychain is the usual source; the two Linux keystores
+are unverified guesses, so on Linux expect the file to be what works. See
+[`docs/discovery-notes.md`](docs/discovery-notes.md).
 
 On the phone, tokens are stored in the Android Keystore and never logged.
 
 ## Status
 
-Design approved, not yet implemented. See
-[`docs/superpowers/specs/2026-09-04-headroom-design.md`](docs/superpowers/specs/2026-09-04-headroom-design.md).
+The link generator in `tools/` is built and works end to end against a real
+Claude Code install. The Android app is not started yet.
 
-Implementation targets a machine with the Android toolchain installed (JDK,
+See [`docs/superpowers/specs/2026-09-04-headroom-design.md`](docs/superpowers/specs/2026-09-04-headroom-design.md)
+for the design and [`docs/discovery-notes.md`](docs/discovery-notes.md) for what
+was verified against a live install, and when.
+
+One thing remains unverified: whether a phone camera actually scans the QR off a
+terminal. That needs a device and the app, so it is checked when the app exists.
+
+App implementation targets a machine with the Android toolchain installed (JDK,
 Android SDK, Gradle).
