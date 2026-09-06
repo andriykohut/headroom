@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -44,6 +45,14 @@ MIN_INTERVAL = 300
 
 DEFAULT_BACKOFF = 6 * 3600
 MAX_BACKOFF = 24 * 3600
+
+# Usage cannot change while nobody is using Claude, so polling an idle account
+# asks a question whose answer is already on file. When this machine shows no
+# Claude Code activity for this long, the relay goes quiet - overnight and at
+# weekends that is no requests at all. Generous, because the cost of being
+# slightly late is a stale number and the cost of being wrong is a day-long
+# lockout that also hits Claude Code and the web.
+IDLE_AFTER = 4 * 3600
 
 
 class RelayError(Exception):
@@ -98,6 +107,29 @@ class State:
         temporary.replace(path)
 
 
+def last_activity(config_dir: Path | None = None) -> float | None:
+    """When Claude Code last wrote a session on this machine, if it can be seen.
+
+    Returns None when there is nothing to read - a machine where Claude Code has
+    never run, or a layout this does not recognise. That is deliberately not the
+    same as "idle": with no signal the relay polls on its schedule rather than
+    inventing a reason to stay quiet.
+    """
+    base = config_dir or Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+    projects = base / "projects"
+    if not projects.is_dir():
+        return None
+    newest = None
+    for path in projects.rglob("*.jsonl"):
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            continue
+        if newest is None or stamp > newest:
+            newest = stamp
+    return newest
+
+
 def bootstrap_state() -> State:
     """Take ownership of the credential this machine's Claude Code holds."""
     return State(tokens=resolve_tokens(), provider=resolve_provider())
@@ -113,9 +145,13 @@ class Relay:
     interval: int = DEFAULT_INTERVAL
     now: Callable[[], float] = time.time
 
+    idle_after: int = IDLE_AFTER
+    activity: Callable[[], float | None] = staticmethod(last_activity)
+
     snapshot: Snapshot | None = None
     retry_after: float = 0.0
     last_error: str | None = None
+    idle: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def authorised(self, header: str | None) -> bool:
@@ -124,11 +160,25 @@ class Relay:
             return False
         return hmac.compare_digest(header[len("Bearer "):], self.secret)
 
+    def should_poll(self) -> bool:
+        """Whether asking upstream could tell us anything new."""
+        if self.now() < self.retry_after:
+            return False
+        seen = self.activity()
+        if seen is None:
+            # No activity signal on this machine - poll on the schedule.
+            return True
+        return (self.now() - seen) < self.idle_after
+
     def poll(self) -> None:
         """One cycle. Records failures rather than raising: a relay that exits
         on a transient network error is worse than one showing an old reading."""
-        if self.now() < self.retry_after:
+        if not self.should_poll():
+            with self._lock:
+                self.idle = self.now() >= self.retry_after
             return
+        with self._lock:
+            self.idle = False
         try:
             body = self._fetch()
         except RelayError as error:
@@ -248,6 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             "age_seconds": int(self.relay.now() - snapshot.fetched_at) if snapshot else None,
             "last_error": error,
             "rate_limited_until": int(self.relay.retry_after) or None,
+            "idle": self.relay.idle,
         }
 
     def _respond(self, status: int, body: str, content_type: str) -> None:

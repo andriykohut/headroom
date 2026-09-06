@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from headroom_link.payload import Provider, Tokens
@@ -184,3 +185,63 @@ def test_a_refresh_without_a_new_refresh_token_keeps_the_old_one(tmp_path, monke
     monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: Response())
     r._refresh()
     assert r.state.tokens.refresh_token == "rt-1"
+
+
+# --- polling only while there is something to learn ---
+
+def test_recent_activity_means_poll(tmp_path):
+    r = relay(tmp_path, activity=lambda: 1_000.0 - 60)
+    assert r.should_poll()
+
+
+def test_a_long_idle_machine_is_not_polled(tmp_path):
+    # Usage cannot change while nobody is using Claude, so the request would
+    # ask a question whose answer is already on file.
+    r = relay(tmp_path, activity=lambda: 1_000.0 - 5 * 3_600)
+    assert not r.should_poll()
+
+
+def test_no_activity_signal_falls_back_to_the_schedule(tmp_path):
+    # A machine where Claude Code has never run, or a layout we do not
+    # recognise. Absence of a signal is not evidence of idleness.
+    r = relay(tmp_path, activity=lambda: None)
+    assert r.should_poll()
+
+
+def test_a_rate_limit_outranks_activity(tmp_path):
+    r = relay(tmp_path, activity=lambda: 1_000.0)
+    r.retry_after = 9_999.0
+    assert not r.should_poll()
+
+
+def test_going_idle_keeps_the_last_reading(tmp_path):
+    r = relay(tmp_path, activity=lambda: 1_000.0 - 5 * 3_600)
+    r.snapshot = Snapshot(body='{"limits":[]}', fetched_at=900.0)
+    r.poll()
+    assert r.snapshot.fetched_at == 900.0
+    assert r.idle
+
+
+def test_activity_resuming_clears_idle(tmp_path):
+    r = relay(tmp_path, activity=lambda: 1_000.0)
+    r.idle = True
+    r._fetch = lambda: "{}"
+    r.poll()
+    assert not r.idle
+
+
+def test_last_activity_reads_the_newest_session(tmp_path):
+    from headroom_link.relay import last_activity
+    projects = tmp_path / "projects" / "some-project"
+    projects.mkdir(parents=True)
+    old, new = projects / "a.jsonl", projects / "b.jsonl"
+    old.write_text("{}")
+    new.write_text("{}")
+    os.utime(old, (1_000, 1_000))
+    os.utime(new, (5_000, 5_000))
+    assert last_activity(tmp_path) == 5_000
+
+
+def test_last_activity_is_none_without_a_projects_directory(tmp_path):
+    from headroom_link.relay import last_activity
+    assert last_activity(tmp_path) is None
