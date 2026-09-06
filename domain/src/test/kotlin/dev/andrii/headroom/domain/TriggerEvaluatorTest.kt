@@ -111,10 +111,36 @@ class TriggerEvaluatorTest {
     }
 
     @Test
-    fun `approaching limit does not fire when already above on both sides`() {
+    fun `approaching limit still fires when the previous reading was also above`() {
+        // Not a crossing check: the UI's refresh writes to the same cache the
+        // coordinator reads as `previous`, so requiring a crossing meant a user
+        // who opened the app while over their line never got told. The log is
+        // what makes this once-per-window - see the next test.
         val previous = snapshot(bucket(BucketKind.SESSION, utilization = 95.0))
         val current = snapshot(bucket(BucketKind.SESSION, utilization = 96.0))
-        assertTrue(evaluate(previous, current, now = 1_500).isEmpty())
+        assertEquals(
+            listOf(TriggerType.APPROACHING_LIMIT),
+            evaluate(previous, current, now = 1_500).map { it.key.type },
+        )
+    }
+
+    @Test
+    fun `approaching limit does not fire again once the window has been notified`() {
+        val previous = snapshot(bucket(BucketKind.SESSION, utilization = 95.0))
+        val current = snapshot(bucket(BucketKind.SESSION, utilization = 96.0))
+        val key = EventKey("session", 2_000, TriggerType.APPROACHING_LIMIT)
+        assertTrue(evaluate(previous, current, now = 1_500, fired = setOf(key)).isEmpty())
+    }
+
+    @Test
+    fun `lowering the threshold below current usage notifies rather than staying quiet`() {
+        val previous = snapshot(bucket(BucketKind.SESSION, utilization = 70.0))
+        val current = snapshot(bucket(BucketKind.SESSION, utilization = 70.0))
+        val events = evaluate(
+            previous, current, now = 1_500,
+            settings = settings.copy(thresholdPercent = 53.0),
+        )
+        assertEquals(listOf(TriggerType.APPROACHING_LIMIT), events.map { it.key.type })
     }
 
     @Test

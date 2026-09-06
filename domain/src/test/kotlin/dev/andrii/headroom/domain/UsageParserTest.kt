@@ -88,6 +88,31 @@ class UsageParserTest {
     }
 
     @Test
+    fun `reset times that jitter across a minute boundary land on the same value`() {
+        // Observed on the live endpoint: the server computes resets_at per
+        // request, so two polls a minute apart returned 17:20:00.480923 and
+        // 17:19:59.820504. EventKey carries resetsAt, so unrounded that mints a
+        // new key every poll and the same notification fires forever.
+        fun parseReset(stamp: String) = UsageParser.parse(
+            """{"limits":[{"kind":"session","percent":1,"resets_at":"$stamp"}]}""",
+            0,
+        ).buckets.single().resetsAt
+
+        assertEquals(
+            parseReset("2026-09-06T17:20:00.480923+00:00"),
+            parseReset("2026-09-06T17:19:59.820504+00:00"),
+        )
+    }
+
+    @Test
+    fun `a reset time is reported on a whole minute`() {
+        val json = """{"limits":[
+            {"kind":"session","percent":1,"resets_at":"2026-09-06T17:19:59.820504+00:00"}
+        ]}"""
+        assertEquals(0L, UsageParser.parse(json, 0).buckets.single().resetsAt % 60)
+    }
+
+    @Test
     fun `unparseable reset time yields zero rather than failing the whole response`() {
         val json = """{"limits":[{"kind":"session","percent":1,"resets_at":"whenever"}]}"""
         assertEquals(0L, UsageParser.parse(json, 0).buckets.single().resetsAt)

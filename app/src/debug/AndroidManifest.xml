@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <!-- Debug-only design harness; merged into debug builds and no other. -->
+        <!-- Debug-only harnesses; merged into debug builds and no other. -->
         <activity
             android:name=".DemoActivity"
             android:exported="true" />
+        <activity
+            android:name=".DebugPollActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
+            android:name=".DebugLinkActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 </manifest>

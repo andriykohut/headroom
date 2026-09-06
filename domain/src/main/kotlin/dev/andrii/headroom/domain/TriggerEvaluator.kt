@@ -50,6 +50,21 @@ class TriggerEvaluator {
         )
     }
 
+    /**
+     * Fires once per window while above the threshold.
+     *
+     * It deliberately does **not** require an upward crossing against the
+     * previous snapshot. That rule looked equivalent and was not: the UI's
+     * refresh writes to the same cache the coordinator reads as `previous`, so
+     * a user who opened the app while over their line poisoned the baseline and
+     * the next poll saw "above, and above before too" — no crossing, no
+     * notification, silently. Once-per-window is what was actually wanted, and
+     * the notification log already provides it, keyed on the window.
+     *
+     * It also means lowering the threshold below current usage notifies at the
+     * next poll rather than staying quiet until the window rolls over, which is
+     * what someone who just moved their warning line expects.
+     */
     private fun thresholdEvent(
         bucket: LimitBucket,
         before: LimitBucket?,
@@ -58,9 +73,6 @@ class TriggerEvaluator {
         if (!settings.approachingLimit) return null
         val threshold = settings.thresholdPercent
         if (bucket.utilization < threshold) return null
-        // Fire on the upward crossing only. With no previous reading we cannot
-        // see a crossing, so treat "already above" as the crossing.
-        if (before != null && before.utilization >= threshold) return null
         return NotificationEvent(
             key = EventKey(bucket.identity, bucket.resetsAt, TriggerType.APPROACHING_LIMIT),
             title = "${bucket.title} at ${bucket.utilization.toInt()}%",

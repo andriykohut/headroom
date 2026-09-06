@@ -85,17 +85,30 @@ object UsageParser {
      * An unreadable value yields 0 rather than throwing: one malformed reset
      * time should cost that bucket its countdown, not cost the user the whole
      * screen.
+     *
+     * **The result is rounded to the nearest minute, and that is load-bearing.**
+     * The server computes this field per request rather than sending a fixed
+     * instant, so two polls a minute apart return times that differ by a
+     * fraction of a second — observed 17:20:00.480923 then 17:19:59.820504.
+     * EventKey is (bucket identity, resetsAt, trigger type), so unrounded that
+     * jitter mints a fresh key on every poll, de-duplication fails open, and
+     * the same notification fires every twenty minutes forever. Rounding to
+     * the minute absorbs it; a window is five hours or seven days, so the
+     * lost precision costs nothing.
      */
     private fun resetsAt(element: JsonElement?): Long {
         val primitive = element?.jsonPrimitive ?: return 0L
-        primitive.longOrNull?.let { return it }
+        primitive.longOrNull?.let { return toNearestMinute(it) }
         val text = primitive.contentOrNull ?: return 0L
         return try {
-            OffsetDateTime.parse(text).toEpochSecond()
+            toNearestMinute(OffsetDateTime.parse(text).toEpochSecond())
         } catch (_: DateTimeParseException) {
             0L
         }
     }
+
+    private fun toNearestMinute(epochSeconds: Long): Long =
+        Math.round(epochSeconds / 60.0) * 60L
 
     /**
      * The model a scoped bucket applies to, or blank.

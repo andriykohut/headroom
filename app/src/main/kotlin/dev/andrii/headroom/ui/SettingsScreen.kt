@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -67,7 +69,10 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                // Landscape and small phones cut the last rows off otherwise,
+                // and "Unlink this phone" is the last row.
+                .verticalScroll(rememberScrollState()),
         ) {
             TriggerRow(
                 title = "Session reset",
@@ -183,7 +188,9 @@ private fun ThresholdRow(value: Double, onValueChange: (Double) -> Unit) {
             value = value.toFloat(),
             onValueChange = { onValueChange(it.toDouble()) },
             valueRange = 50f..99f,
-            steps = 48,
+            // Continuous: 48 steps draws 48 tick marks, which turns a quiet
+            // row into a dotted rule. clampThreshold already rounds the value
+            // to a whole percent, so the ticks bought nothing.
             modifier = Modifier.fillMaxWidth(),
         )
     }
