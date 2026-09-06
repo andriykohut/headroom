@@ -51,4 +51,16 @@ data class LimitBucket(
     val group: String = "",
     val severity: String = "",
     val isActive: Boolean = false,
-)
+    val scopeLabel: String = "",
+) {
+    /**
+     * What makes this bucket distinct from its siblings.
+     *
+     * [rawKind] alone is not enough. Every per-model weekly bucket arrives as
+     * `weekly_scoped`, so two models sharing a reset time would collapse onto
+     * one de-duplication key and one of them would go unnotified. The scope
+     * label is the only thing that separates them.
+     */
+    val identity: String
+        get() = if (scopeLabel.isBlank()) rawKind else "$rawKind:$scopeLabel"
+}

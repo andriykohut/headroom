@@ -50,6 +50,28 @@ class UsageParserTest {
     }
 
     @Test
+    fun `scoped buckets get an identity that separates one model from another`() {
+        // Every per-model weekly bucket arrives as kind "weekly_scoped", so
+        // rawKind alone cannot tell two models apart - and de-duplication keys
+        // off identity.
+        val json = """{"limits":[
+            {"kind":"weekly_scoped","percent":1,"resets_at":1,
+             "scope":{"model":{"display_name":"Opus"}}},
+            {"kind":"weekly_scoped","percent":2,"resets_at":1,
+             "scope":{"model":{"display_name":"Sonnet"}}}
+        ]}"""
+        val buckets = UsageParser.parse(json, 0).buckets
+        assertEquals(listOf("Opus", "Sonnet"), buckets.map { it.scopeLabel })
+        assertEquals(2, buckets.map { it.identity }.toSet().size)
+    }
+
+    @Test
+    fun `an unscoped bucket's identity is just its kind`() {
+        val json = """{"limits":[{"kind":"session","percent":1,"resets_at":1,"scope":null}]}"""
+        assertEquals("session", UsageParser.parse(json, 0).buckets.single().identity)
+    }
+
+    @Test
     fun `resets_at is read as an ISO-8601 timestamp`() {
         val json = """{"limits":[
             {"kind":"session","percent":1,"resets_at":"2026-09-06T18:00:00.876755+00:00"}
