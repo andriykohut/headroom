@@ -60,15 +60,34 @@ On the phone, tokens are stored in the Android Keystore and never logged.
 
 ## Status
 
-The link generator in `tools/` is built and works end to end against a real
-Claude Code install. The Android app is not started yet.
+Both halves are built and verified end to end against a real account: the link
+generator in `tools/`, and the Android app.
 
-See [`docs/superpowers/specs/2026-09-04-headroom-design.md`](docs/superpowers/specs/2026-09-04-headroom-design.md)
-for the design and [`docs/discovery-notes.md`](docs/discovery-notes.md) for what
-was verified against a live install, and when.
+- [`docs/superpowers/specs/2026-09-04-headroom-design.md`](docs/superpowers/specs/2026-09-04-headroom-design.md) — the design
+- [`docs/ui-design-direction.md`](docs/ui-design-direction.md) — how the screens and the app mark were arrived at
+- [`docs/discovery-notes.md`](docs/discovery-notes.md) — what was verified against a live install, and when
+- [`docs/verification.md`](docs/verification.md) — the end-to-end run, including four bugs no unit test could reach
+- [`docs/follow-ups.md`](docs/follow-ups.md) — what is knowingly still open
 
-The QR has been scanned off a terminal with a phone's built-in camera, and
-`/headroom-link` works from a clone of this repo.
+The QR has been scanned off a terminal with a phone's built-in camera,
+`/headroom-link` works from a clone of this repo, and the app reads a real
+account's usage and notifies on it.
 
-App implementation targets a machine with the Android toolchain installed (JDK,
-Android SDK, Gradle).
+## Building the app
+
+Needs a JDK, the Android SDK and Gradle.
+
+```bash
+./gradlew :domain:test :app:testDebugUnitTest   # 169 tests
+./gradlew :app:assembleDebug
+```
+
+A release build is signed from `keystore.properties` at the repository root —
+gitignored, and absent on a machine without a signing key, in which case only
+debug builds are available. Release is not debuggable, which matters: a
+debuggable app holding a live credential lets anyone with adb access ask the
+Keystore to decrypt it.
+
+```bash
+./gradlew :app:assembleRelease
+```
