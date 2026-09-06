@@ -141,7 +141,7 @@ class UsageParserTest {
         // The real response is an object with many keys; only `limits` holds
         // the buckets, and picking "the first array" is not good enough.
         val json = """{
-            "amber_ladder":[{"kind":"session","percent":99,"resets_at":1}],
+            "some_other_list":[{"kind":"session","percent":99,"resets_at":1}],
             "limits":[{"kind":"session","percent":11,"resets_at":2}]
         }"""
         assertEquals(11.0, UsageParser.parse(json, 0).bucket(BucketKind.SESSION)!!.utilization)
