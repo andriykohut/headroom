@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  108dp adaptive canvas. The disc is r=27 so it sits inside the 66dp safe zone
+  with room for the launcher's parallax.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#DCEAF7" android:pathData="M29.25 43.2A27 27 0 0 1 78.75 43.2Z"/>
+    <path android:fillColor="#DCEAF7" android:pathData="M27.63 48.2A27 27 0 1 0 80.37 48.2Z"/>
+</vector>

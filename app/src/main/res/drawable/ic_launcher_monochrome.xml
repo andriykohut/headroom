@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The themed-icon layer. Android 13+ tints this to the wallpaper palette, so
+  it carries no colour of its own - only the shape and its gap.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:pathData="M29.25 43.2A27 27 0 0 1 78.75 43.2Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M27.63 48.2A27 27 0 1 0 80.37 48.2Z"/>
+</vector>
