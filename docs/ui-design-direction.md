@@ -640,7 +640,7 @@ omitted, the screen ends after the last row.
 ## 11. What not to do
 
 - No app name, logo or wordmark in any screen's chrome. The launcher icon is
-  an abstract gauge mark in `primary` on `surface` — a notched arc — and
+  the mark in §13 — a disc with the threshold slit cut through it — and
   nothing that resembles any AI company's mark.
 - No cream, terracotta, coral, orange or salmon anywhere, in either theme.
 - No cards around data. A container means "something other than the data is
@@ -742,3 +742,52 @@ these are what the design needs from the rewritten domain):
 None of these change `UsageState`, `interpretScan`, `clampThreshold`, the
 existing formatters, or any UI test in the plan; items 11–13 are parser and
 domain-model requirements the Part 1 rewrite should absorb.
+
+## 13. The mark
+
+One mark has to serve three places that want different things: the launcher
+(adaptive, masked to a circle, squircle, rounded square or teardrop, and
+parallaxed), the themed icon (Android 13+, a single colour re-tinted to the
+wallpaper), and the notification small icon — the one that matters most for
+an app whose job is notifying — which Android renders as a flat white
+silhouette at 24dp, keeping only the alpha channel.
+
+**The mark is a disc cut once by a thin horizontal slit near the top.** The
+body below the slit is what has been used; the slit is the warning line from
+the meter — the same notch that cuts through every bar on the Usage screen;
+the sliver above it is the headroom. It is two paths and one gap, so the
+silhouette, the monochrome icon and the full-colour icon are literally the
+same shape rather than three interpretations of it. Rendered in context in
+`docs/ui-mockup.html`.
+
+What it is not: a battery (no nub, no outline), a gauge (no arc, no needle),
+a pie (a chord, not a radius), a progress bar in a box. The slit is thin
+(≈9% of the diameter) and sits at 30% of the height, which keeps it clear of
+the centred, thick bar of the no-entry sign even when a themed wallpaper
+tints it red.
+
+Adaptive icon, 108dp canvas, disc r = 27 at (54, 54) — 54dp across, inside
+the 66dp safe zone with 6dp to spare for parallax — slit 5dp tall:
+
+```xml
+<!-- res/drawable/ic_launcher_foreground.xml  viewportWidth/Height = 108 -->
+<path android:fillColor="#DCEAF7" android:pathData="M29.25 43.2A27 27 0 0 1 78.75 43.2Z"/>
+<path android:fillColor="#DCEAF7" android:pathData="M27.63 48.2A27 27 0 1 0 80.37 48.2Z"/>
+<!-- res/drawable/ic_launcher_background.xml: one 108x108 rect path, #24405A -->
+<!-- res/drawable/ic_launcher_monochrome.xml: the two foreground paths, any single colour -->
+```
+
+Notification icon, 24dp canvas, disc r = 10.5 at (12, 12), slit 2.2dp:
+
+```xml
+<!-- res/drawable/ic_notification.xml  viewportWidth/Height = 24 -->
+<path android:fillColor="#FFFFFF" android:pathData="M2.94 6.7A10.5 10.5 0 0 1 21.06 6.7Z"/>
+<path android:fillColor="#FFFFFF" android:pathData="M1.97 8.9A10.5 10.5 0 1 0 22.03 8.9Z"/>
+```
+
+Colours: background `#24405A` (a deep tone of the primary hue), foreground
+`#DCEAF7` (a very light tone of it). Both parts of the disc share one colour
+in every variant — the gap is the mark, not a fill level — and the
+notification `color` is the dark-scheme `primary` (`#A6C8E8`) so the shade
+tints the silhouette to match the bars. The mark carries no gradient, no
+stroke and no text, so it needs nothing a `VectorDrawable` cannot draw.
