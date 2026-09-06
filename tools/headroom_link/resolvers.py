@@ -166,3 +166,44 @@ class KWalletResolver(_CommandResolver):
         self.argv = [
             "kwallet-query", "-r", KEYCHAIN_SERVICE or "Claude Code", "kdewallet",
         ]
+
+
+class CredentialNotFound(Exception):
+    """No source yielded a credential. Names every source tried."""
+
+    def __init__(self, tried: list[str], failures: list[str]) -> None:
+        self.tried = tried
+        detail = "; ".join(failures) if failures else "no source had a credential"
+        super().__init__(
+            f"could not find Claude Code credentials. Tried: {', '.join(tried)}. "
+            f"{detail}. Is Claude Code installed and logged in on this machine?"
+        )
+
+
+def default_resolvers() -> list[Resolver]:
+    """Spec §3 resolution order: portable file first, then OS keystores."""
+    return [
+        CredentialFileResolver(),
+        KeychainResolver(),
+        SecretToolResolver(),
+        KWalletResolver(),
+    ]
+
+
+def resolve_tokens(resolvers: list[Resolver] | None = None) -> Tokens:
+    chain = default_resolvers() if resolvers is None else resolvers
+    tried: list[str] = []
+    failures: list[str] = []
+    for resolver in chain:
+        tried.append(resolver.name)
+        try:
+            if not resolver.available():
+                continue
+            tokens = resolver.resolve()
+        except ResolverError as exc:
+            # A corrupt source must not mask a working one further down.
+            failures.append(f"{resolver.name}: {exc}")
+            continue
+        if tokens is not None:
+            return tokens
+    raise CredentialNotFound(tried, failures)
