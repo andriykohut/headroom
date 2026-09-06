@@ -24,3 +24,6 @@ secrets.properties
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Harness-managed git worktrees
+.claude/worktrees/
