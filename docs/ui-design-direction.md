@@ -5,8 +5,19 @@ It fits the behaviour and state handling those tasks define; where it asks for
 something the plan does not have, §12 lists it. Everything here is expressed in
 Material 3 terms so it maps onto Compose without interpretation.
 
-Read with: spec §1 (purpose), §2 (bucket kinds and titles), §5 (triggers),
-§7 (nothing fails silently).
+Read with: spec §1 (purpose), §2 (the live response shape, verified
+2026-09-06 — an earlier draft of this document was designed against the
+superseded shape), §5 (triggers), §7 (nothing fails silently), and the real
+fixture at `domain/src/test/resources/usage_response.json`.
+
+What the design consumes per limit entry, in wire terms: `kind` (`session`,
+`weekly_all`, `weekly_scoped`, or anything new), `group` (`session`,
+`weekly`, or anything new), `percent` (integer 0–100, percent used),
+`severity` (string; `normal` observed), `resets_at` (ISO-8601 with offset),
+`scope.model.display_name` (for `weekly_scoped`), and `is_active` (boolean).
+Plus one domain-level boolean, `rejected`, which the parser derives — the
+design does not care from which wire field, only that it is true exactly when
+the server says requests are being refused.
 
 ## 1. Point of view
 
@@ -66,7 +77,7 @@ Rules that keep the palette honest:
 Colour is the fastest cue, so it is used, but every state also differs in
 **form**, **weight** and **words**:
 
-| | Fine | Approaching (`utilization >= threshold`, not rejected) | Wall (`rejected == true`) |
+| | Fine | Approaching (`percent >= threshold`, not rejected) | Wall (`rejected == true`) |
 | --- | --- | --- | --- |
 | Fill | solid `primary`, stops short of the notch | solid `tertiary`, past the notch | full-width `errorContainer` with 45° `error` hatch lines |
 | Notch | visible ahead of the fill | visible behind the fill | visible, inside the hatch |
@@ -78,9 +89,11 @@ So at a glance: approaching makes *how much* loud; the wall makes *when* loud.
 That difference holds in greyscale, and it holds for a `weekly_scoped` bucket
 with a 30-character model name just as well as for the hero.
 
-Edge: `utilization >= 100` with `rejected == false` renders as approaching
-(full solid `tertiary` fill) with the status line "At limit, resets in …".
-The hatch is reserved for the server saying rejected.
+Edge: `percent == 100` with `rejected == false` renders as approaching (full
+solid `tertiary` fill) with the status line "At limit, resets in …". The hatch
+is reserved for the server saying rejected. The server's own `severity` never
+changes which of the three states a bar is in — see §5 for why, and for what
+it does instead.
 
 ## 3. Typography
 
@@ -118,6 +131,12 @@ The number is *used*, not remaining, and the hero says so once with the small
 notification are all phrased in percent used; the app must not be the one
 place that inverts it. The bar's empty track is the headroom — that is where
 the name lives, visually, without a second number.
+
+`percent` arrives as an integer, so there is no formatting step: render it
+with `toString()` and a "%" — no rounding, no decimals to drop, no locale
+number formatter (which would otherwise insert grouping separators or
+non-ASCII digits and defeat the tabular slot). The slot reserved at the width
+of "100%" is therefore also the maximum the value can occupy.
 
 No all-caps labels anywhere. No eyebrow labels. No dividers.
 
@@ -158,7 +177,7 @@ Anatomy and rules:
 - **Track**: `surfaceContainerHighest`, full-width, `CircleShape`. It is the
   headroom, so it is always solid — never faded, never an outline (except the
   placeholder, §6).
-- **Fill**: from the left, `fraction = (utilization / 100).coerceIn(0, 1)`,
+- **Fill**: from the left, `fraction = (percent / 100f).coerceIn(0f, 1f)`,
   same rounded shape, `primary` / `tertiary` per state. Animate the fraction
   with `animateFloatAsState` (400 ms, `FastOutSlowInEasing`) — the only
   non-user-triggered motion in the app. The system animator scale handles
@@ -172,38 +191,97 @@ Anatomy and rules:
 - **Title**: takes the remaining width (`weight(1f)`), `maxLines = 2`, ellipsis
   at the end. The number column never shrinks or wraps. A long `weekly_scoped`
   display name therefore wraps to a second line and the number stays put.
-- **Number** shows the actual value even above 100 ("112%"); only the fill
-  clamps.
-- **Status line**: the countdown is `formatCountdown(resetsAt - now)`. When
-  it reads "now" (the window has passed but the data predates it), render
-  "Reset. Refresh for the new window." in `onSurface` — the number above is
-  from the old window, so it is dimmed as stale (§6).
+- **Number** shows `percent` exactly as sent. The clamp on the fill is
+  defensive only; the wire contract is 0–100.
+- **Status line**: `resets_at` is a wall-clock instant (ISO-8601 with offset;
+  parse with `java.time.OffsetDateTime` and keep it as epoch seconds in the
+  domain). The countdown is `formatCountdown(resetsAt - now)` evaluated at
+  render time, so it is always computed against the phone's clock, never
+  against the snapshot's. When it reads "now" (the window has passed but the
+  data predates it), render "Reset. Refresh for the new window." in
+  `onSurface` — the number above is from the old window, so it is dimmed as
+  stale (§6).
 
 ## 5. Grouping and order
 
-`resetsAt` is absolute and `utilization` is per window, so session and weekly
-buckets mean different things and are never interleaved.
+The server sends `group` with every entry, so session-versus-weekly is given,
+not derived. The screen has one band per `group` value, in this order:
 
 ```
-[Current session]         hero — BucketKind.FIVE_HOUR
+[Current session]         hero — the entry with kind == "session"
+                          (any further entries with group == "session" render compact beneath it)
 
-This week                 group header
-  All models              SEVEN_DAY, always first
-  Opus                    then SEVEN_DAY_*, SEVEN_DAY_OVERAGE_INCLUDED, and any bucket
-  Sonnet only             whose rawKind == "weekly_scoped", in the order the server sent them
-  Fable limit
+This week                 band for group == "weekly"
+  All models              kind == "weekly_all", always first
+  Opus                    then every other weekly entry — weekly_scoped, titled from
+  Sonnet                  scope.model.display_name, and any kind not yet known —
+                          in the order the server sent them
 
-Other                     group header, shown only if the group is non-empty
-  Usage / overage         OVERAGE
-  seven_day_haiku         UNKNOWN, titled by rawKind, with the hint line from §6
+<group value>             one band per unrecognised group value, headed by that value
+  <kind or display name>  verbatim (e.g. "monthly"), after This week, in server order;
+                          entries render with the hint line from §6
 ```
 
-Implement as a pure `groupBuckets(snapshot): Groups` with a unit test; the
-UI only iterates. Compact titles come from a pure `displayLabel(bucket)`:
-inside the "This week" group, a title matching `Current week (X)` shows as
-`X`; every other title shows verbatim. This removes the prefix the header
-already states and touches nothing outside the UI — `LimitBucket.title` and
-the notification copy are unchanged.
+Rules, each a line in a pure `groupBuckets(snapshot): List<Band>` with a
+unit test against the committed fixture:
+
+- Band order: `session`, `weekly`, then unrecognised groups in first-seen
+  order. A band with no entries is not drawn, except the two expected slots
+  in §6 (missing bucket).
+- Within a band, the anchor kind (`session`, `weekly_all`) comes first; the
+  rest keep server order. Never sort by percent, `severity` or `is_active` —
+  the layout must be the same shape every time it is opened.
+- There is no catch-all "Other" band any more. An unrecognised `kind` inside
+  a known group stays in that group (a new weekly limit is still a weekly
+  limit); only an unrecognised `group` earns a new band, and the band's
+  header is the group string itself, sentence-cased if it is a single word,
+  otherwise verbatim.
+- Titles: the hero keeps "Current session". Compact rows show a
+  `displayLabel(bucket)`: inside "This week", a title of the form
+  `Current week (X)` shows as `X` (so `weekly_all` reads "All models" and a
+  scoped entry reads its `display_name`); every other title shows verbatim.
+  This only removes the prefix the header already states — `LimitBucket.title`
+  and the notification copy are unchanged. `scope.surface` has only been seen
+  as `null`; ignore it until it means something.
+
+### `is_active` — kept, not shown
+
+The server marks one entry as the limit currently binding. It is tempting to
+let it choose the hero. Don't: a glanceable meter must be the same shape every
+time, so the hand goes to the same place — hero is always the session, the
+week is always below it. Reordering on a server flag would also collide with
+the stale rule (a stale snapshot would keep a stale hero) and with the
+three-state vocabulary, which already uses weight and position. The flag's
+semantics are also known from exactly one observation (session active at 23%,
+weeklies inactive at 12% and 7%), which is not enough to build layout on.
+
+So `is_active` is carried in the domain model, ignored by the layout, and not
+rendered in v1. If a second reading ever shows it moving to a weekly bucket
+while the session is fine, the right use is the accessibility description
+("currently the binding limit") and possibly a small `onSurface` dot before
+that row's title — never a reorder.
+
+### `severity` — the server's word versus the user's line
+
+The notch, the approaching colour and the approaching notification are all
+keyed to the user's own threshold; that is the one number the user set and
+can see on the meter. `severity` is the server's independent assessment,
+observed only as `normal`, and the two can disagree in both directions:
+
+| `percent` vs threshold | `severity` | Bar state | Extra |
+| --- | --- | --- | --- |
+| 95 ≥ 90 | `normal` | approaching (tertiary) | nothing |
+| 75 < 90 | something other than `normal` | fine (primary) | a hint line |
+| any | whatever the parser maps to `rejected` | wall (hatched) | nothing — the wall says it |
+
+The picture always follows the user's number; the server's disagreement
+becomes words, never a second colour system. Concretely: any `severity` the
+parser does not recognise as `normal` or as the wall is rendered as a hint
+line under the status line, `bodySmall` `onSurfaceVariant`, in the same slot
+the unknown-kind hint uses: "Server flags this limit as <value>." — value
+verbatim. Nothing is dropped silently (§7), and nothing contradicts the
+notch. Which `severity` value(s) mean "rejected" is the parser's decision
+(§12); the design only consumes the resulting boolean.
 
 ## 6. Usage screen, state by state
 
@@ -228,7 +306,7 @@ Layout skeleton, portrait, 360dp wide:
 │ ████████████████████████████████ ██░   │  ← tertiary fill, past the notch
 │ Near limit, resets in 3d 4h            │
 │                                        │
-│ Sonnet only                      12%   │
+│ Sonnet                           12%   │
 │ █████░░░░░░░░░░░░░░░░░░░░░ ░░░         │
 │ Resets in 3d 4h                        │
 └────────────────────────────────────────┘
@@ -244,10 +322,15 @@ line and the hero.
 
 **Ready, stale** (`now - fetchedAt > STALE_AFTER_SECONDS`). The age line
 becomes `titleSmall`, 600, `onSurface`: "Updated 3 hr ago". Every number and
-fill drops to 38% alpha (the M3 disabled convention) — the utilization is what
-went stale. Countdowns keep full strength, because `resetsAt` is absolute and
-still true. The refresh icon stays. Nothing else changes; the screen looks
-dimmed, which is exactly what it is.
+fill drops to 38% alpha (the M3 disabled convention). Countdowns keep full
+strength. The split is principled, not cosmetic: `percent` is a *sample* —
+it was true at `fetchedAt` and has drifted since — whereas `resets_at` is a
+*fact*, a wall-clock instant that does not age. The countdown is recomputed
+from the phone's clock on every render, so it is exactly as correct at three
+hours old as at three seconds old, right up until it reaches zero and the
+"Reset. Refresh for the new window." line takes over (§4). The refresh icon
+stays. Nothing else changes; the screen looks dimmed, which is exactly what
+it is.
 
 **Refreshing** (a refresh in flight from any state). The age line reads
 "Updating…" and the refresh icon is replaced by a 20dp indeterminate
@@ -333,26 +416,30 @@ the screen becomes, so the empty state is a preview rather than a void. The
 tool name appears in body copy only — it is an instruction, not a brand — and
 never in a title, app bar or icon.
 
-**Unknown bucket kind** (`kind == UNKNOWN`, `rawKind` e.g. `seven_day_haiku`).
-Rendered in the Other group with the compact bar, title = `rawKind` verbatim,
-plus a hint line under the status line:
+**Unrecognised kind or group.** An entry whose `kind` the parser has not seen
+renders with the compact bar in whatever band its `group` puts it (§5),
+titled from `scope.model.display_name` if the server supplied one, otherwise
+the `kind` string verbatim, plus a hint line under the status line:
 
 ```
-seven_day_haiku                   34%
+weekly_surface                    34%
 ██████████░░░░░░░░░░░░░░░░ ░░░
 Resets in 2d 1h
 Limit type the app doesn't recognise yet   bodySmall onSurfaceVariant
 ```
 
-Same bar, same states, same notch. The hint is the only difference; an unknown
-bucket at the wall still hatches.
+An entry whose `group` is new gets its own band headed by the group string
+(§5) and the same hint. Same bar, same states, same notch; an unrecognised
+entry at the wall still hatches, and one past the user's threshold still turns
+tertiary. The hint slot is shared with the `severity` hint from §5; if both
+apply, the kind hint comes first, each on its own line.
 
-**Expected bucket missing.** Only two buckets are expected: `FIVE_HOUR` (the
-hero) and `SEVEN_DAY` (first in This week). When either is absent from a
-snapshot, its slot shows the placeholder bar at full alpha with "—" for the
-number and the line "Not reported in the last reading." Never 0%, never an
-empty fill. Per-model buckets come and go with the plan and get no
-placeholder.
+**Expected bucket missing.** Only two entries are expected: `kind ==
+"session"` (the hero) and `kind == "weekly_all"` (first in This week). When
+either is absent from a snapshot, its slot shows the placeholder bar at full
+alpha with "—" for the number and the line "Not reported in the last
+reading." Never 0%, never an empty fill. `weekly_scoped` entries come and go
+with the plan and get no placeholder.
 
 **Approaching and the wall** on the hero, side by side:
 
@@ -544,7 +631,11 @@ omitted, the screen ends after the last row.
 - No entrance animations, no per-item fades. The fill animation is the one
   motion.
 - Never invent a bucket. If the server sends four, show four; if it sends a
-  kind the app has never seen, show it as it came.
+  kind or group the app has never seen, show it as it came.
+- Never reorder on data. Not by `percent`, not by `severity`, not by
+  `is_active`. The layout is the same shape every time it is opened.
+- Never let the server's `severity` recolour a bar. The user's threshold owns
+  the picture; the server's opinion is a line of text.
 
 ## 12. Where this departs from the plan
 
@@ -557,7 +648,7 @@ plan's code does not have, or reverses a rendering choice. Each is small.
 2. **`UsageScreen` needs `thresholdPercent: Double`.** The notch is drawn at
    the configured threshold. `MainActivity` reads `SettingsStore.flow` and
    passes it down; the approaching state is computed in the UI as
-   `utilization >= threshold && !rejected`, matching `TriggerEvaluator`.
+   `percent >= threshold && !rejected`, matching `TriggerEvaluator`.
 3. **Hard-coded green/amber/red → theme roles.** The plan's `barColour`
    mirrors the terminal statusline (60/85 breakpoints). This design keys the
    colour change to the user's own threshold instead, so the bar, the notch
@@ -587,5 +678,33 @@ plan's code does not have, or reverses a rendering choice. Each is small.
     alerts may arrive late. Allow exact alarms" with a button deep-linking to
     the system page. Both are outside Tasks 14–16 and can follow.
 
-None of these change `UsageState`, `LimitBucket`, `interpretScan`,
-`clampThreshold`, the formatters, or any test in the plan.
+Added after the live response shape replaced spec §2's original (the plans
+still describe the old `five_hour`/`seven_day` model as of this revision;
+these are what the design needs from the rewritten domain):
+
+11. **`LimitBucket` must carry `group: String`, `severity: String` and
+    `isActive: Boolean`** alongside `kind`, `title`, `percent: Int`,
+    `resetsAt` (epoch seconds, parsed from the ISO-8601 string) and
+    `rejected`. `group` drives the bands (§5); `severity` feeds the hint line;
+    `isActive` is stored but unused (§5). Keep the raw `kind` string even for
+    recognised kinds, as before, so an unrecognised one can be shown verbatim.
+12. **`rejected` is the parser's call, not the UI's.** The old shape had a
+    `status: "rejected"` field; the new one does not, and spec §5's "status
+    transitions into rejected" now has to be read from `severity` (values
+    other than `normal` are unobserved) or from the `at_wall=1` variant's
+    response. The design consumes the boolean; whichever wire signal the
+    parser picks, `percent == 100` alone must *not* set it — that case
+    renders as "At limit" in tertiary, not as the hatched wall.
+13. **Unrecognised `severity` must reach the UI as a string**, not be
+    collapsed to `normal`, so the §5 hint line can name it.
+14. **Optional, recommended:** because `resets_at` is a real timestamp, weekly
+    windows are better told as a time than a countdown — "Resets Tue 03:00"
+    (local time, `EEE HH:mm` via `DateTimeFormatter.ofLocalizedTime` style
+    short) beats "2d 3h" when the answer is days away. Keep the countdown for
+    the session, where "in 2h 14m" is the right grain. This is a new pure
+    `formatResetTime(resetsAt, now, zone)` beside the plan's `formatCountdown`,
+    with its own test; the status-line wording in §2 and §4 otherwise stands.
+
+None of these change `UsageState`, `interpretScan`, `clampThreshold`, the
+existing formatters, or any UI test in the plan; items 11–13 are parser and
+domain-model requirements the Part 1 rewrite should absorb.
