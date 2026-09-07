@@ -72,8 +72,10 @@ enum Commands {
     #[command(verbatim_doc_comment)]
     Serve {
         /// Bind address. The default is loopback because this speaks plain
-        /// HTTP; put a TLS terminator in front of it.
-        #[arg(long, default_value = "127.0.0.1")]
+        /// HTTP; put a TLS terminator in front of it. The environment is
+        /// read too, so a container image can change the default without
+        /// an argument an operator's own arguments would replace.
+        #[arg(long, env = "HEADROOM_HOST", default_value = "127.0.0.1")]
         host: String,
         #[arg(long, default_value_t = 8765)]
         port: u16,
