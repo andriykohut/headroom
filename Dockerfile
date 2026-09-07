@@ -10,11 +10,26 @@ FROM scratch
 ARG TARGETARCH
 COPY dist/headroom-linux-${TARGETARCH} /headroom
 
+# scratch has no shell, so /data cannot be made with RUN mkdir, and / itself
+# is root-owned, so uid 65534 could not create /data on its own even if it
+# tried. An empty directory from the build context carries the ownership
+# instead. Without this, uid 65534 can neither create nor write /data, and
+# the relay would silently never persist a reading -- the state file write
+# is best-effort in the code (`let _ = ...`), so the failure would be
+# invisible: it starts, it serves, it just never remembers anything.
+COPY --chown=65534:65534 dist/data /data
+
 # The binary derives its state path from HOME, and scratch has none set. Left
 # unset, it falls back to the temp directory, and the relay's "a restart does
 # not blank your phone" promise silently stops being true. There is also no
 # /etc/passwd here to look HOME up in, so it must be set directly.
 ENV HOME=/data
+
+# Now safe rather than harmful: /data already exists in the image, owned by
+# 65534:65534, so a container engine that materializes an anonymous volume
+# here inherits that ownership instead of creating a fresh root-owned
+# mount point. Declared so state survives an image upgrade even for an
+# operator who never mounts anything of their own.
 VOLUME /data
 
 # Not root. The systemd unit in the README already runs the relay under
