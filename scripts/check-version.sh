@@ -13,7 +13,7 @@ fi
 
 wanted=${1#v}
 manifest=$(dirname "$0")/../cli/Cargo.toml
-found=$(sed -n 's/^version = "\(.*\)"/\1/p' "$manifest" | head -1)
+found=$(sed -n '/^\[package\]/,/^\[/{ s/^version = "\(.*\)"/\1/p; }' "$manifest" | head -1)
 
 if [ "$wanted" != "$found" ]; then
     echo "version mismatch: tag says $wanted, $manifest says $found" >&2
