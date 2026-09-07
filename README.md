@@ -126,8 +126,13 @@ as in [the relay setup below](#1-the-relay) — into `/etc/headroom` here,
 since this is a system service rather than your own account, not the
 `~/.config/headroom` used there:
 
+The image itself can generate the keys, so you never need `headroom` installed
+on the relay box: `docker run --rm ghcr.io/andriykohut/headroom serve
+--new-secret` works, since `--new-secret` short-circuits before the secret
+check and only needs `/dev/urandom`, which the container provides.
+
 ```bash
-sudo chown 65534:65534 /etc/headroom   # root, unlike the installer above; see why, just below
+sudo chown -R 65534:65534 /etc/headroom   # root, unlike the installer above; see why, just below
 docker run -v /etc/headroom:/keys -v headroom-data:/data \
   -p 127.0.0.1:8765:8765 \
   ghcr.io/andriykohut/headroom \
