@@ -32,5 +32,41 @@ else
     echo "ok   unsupported platform is refused"
 fi
 
+# --- expected_sum(): the lookup that decides whether an unverified binary
+# reaches PATH. Fixtures only, no network. ---
+
+sums_dir=$(mktemp -d)
+trap 'rm -rf "$sums_dir"' EXIT
+
+sums_ok="$sums_dir/SHA256SUMS"
+cat > "$sums_ok" <<'SUMS'
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  headroom-aarch64-apple-darwin
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  headroom-x86_64-unknown-linux-musl
+SUMS
+
+check "exact match returns the hash" \
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "$(expected_sum "$sums_ok" headroom-aarch64-apple-darwin)"
+
+sums_old="$sums_dir/SHA256SUMS.old-only"
+cat > "$sums_old" <<'SUMS'
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  headroom-aarch64-apple-darwin-old
+SUMS
+
+check "a longer entry must not satisfy a shorter request" \
+    "" \
+    "$(expected_sum "$sums_old" headroom-aarch64-apple-darwin)"
+
+check "an asset absent from the file yields nothing" \
+    "" \
+    "$(expected_sum "$sums_ok" headroom-does-not-exist)"
+
+sums_empty="$sums_dir/SHA256SUMS.empty"
+: > "$sums_empty"
+
+check "an empty SHA256SUMS yields nothing" \
+    "" \
+    "$(expected_sum "$sums_empty" headroom-aarch64-apple-darwin)"
+
 [ "$failures" -eq 0 ] || exit 1
 echo "all installer checks passed"
