@@ -69,3 +69,26 @@ Nothing in the app is non-free — the scanner is zxing-cpp (Apache-2.0) — so
 F-Droid's inclusion policy no longer excludes it. It has not been submitted.
 Doing so means a metadata/fastlane directory and a reproducible build recipe
 in F-Droid's format, which is its own piece of work.
+
+## Updating the relay
+
+The relay is a static binary; deploying a new one is a copy and a restart. It
+is built in a container so the server needs no Rust toolchain:
+
+```bash
+tar czf - --exclude='cli/target' cli fixtures \
+  | ssh root@your-relay 'rm -rf /tmp/headroom-src && mkdir -p /tmp/headroom-src \
+      && tar xzf - -C /tmp/headroom-src'
+
+ssh root@your-relay '
+  docker run --rm -v /tmp/headroom-src:/src -w /src/cli rust:1-alpine \
+    sh -c "apk add --no-cache musl-dev >/dev/null && cargo build --release --locked"
+  install -m 755 /tmp/headroom-src/cli/target/release/headroom /usr/local/bin/headroom
+  systemctl restart headroom
+  rm -rf /tmp/headroom-src
+  docker image rm rust:1-alpine
+'
+```
+
+The keys are untouched by this, so the phone does not need re-linking. The
+stored reading survives too — it lives in the state directory, not the binary.

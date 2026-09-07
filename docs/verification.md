@@ -193,6 +193,70 @@ bytes for each key that must not travel.
   the alarm, or the next morning's push.
 - **A real at-the-wall response.** Unchanged.
 - **The `/usage` panel comparison.** Unchanged.
-- **A relay reached over the public internet.** Everything above used a laptop
-  relay on a LAN, and finally a loopback tunnel. TLS termination, and the
-  latency and failure modes of a real host, are untested.
+*(The last of these — a relay on the public internet — was settled on
+2026-09-07; see below.)*
+
+---
+
+# Third run: in production
+
+Run on **2026-09-07**, against the relay that is now actually serving.
+
+| | |
+| --- | --- |
+| Host | Ubuntu 24.04, x86_64, behind Caddy 2.10 and Cloudflare |
+| Relay | `headroom serve` under systemd, `DynamicUser`, loopback only |
+| Binary | 2.3 MB, statically linked against musl, cross-built in a container |
+| Pusher | `headroom push` in a real `~/.claude/statusline.sh` |
+| App | debug build on a Pixel 8a, Android 17 |
+
+## Confirmed in production
+
+**The whole loop, over the public internet.** Caddy's access log for the site
+shows both halves running against each other:
+
+```
+GET  /usage HTTP/2.0  200 472    <- the phone, reading
+POST /usage HTTP/2.0  204   0    <- the status line, pushing
+```
+
+Three bars on the phone, the per-model `Fable` window among them, updating as
+work happened.
+
+**The two keys behave differently, on the live service.** Checked against the
+running relay rather than in a unit test:
+
+| Request | Key | Result |
+| --- | --- | --- |
+| `GET /usage` | none | 401 |
+| `GET /usage` | push key | 401 |
+| `POST /usage` | read key | 401 |
+| `POST /usage` | push key | 204 |
+| `GET /usage` | read key | 200 |
+| `GET /healthz` | none | 200, and carries no reading |
+
+**The keys never travelled.** Both were generated on the server. The push key
+was copied to the laptop over ssh into a mode-600 file; the read key has never
+left the host — the pairing QR is rendered by the binary *on the server* and
+only the image crosses the wire.
+
+## What this cost, and one mistake
+
+Deployment was uneventful except for one self-inflicted failure worth
+recording. Running `caddy validate` **as root** briefly starts the servers,
+which created that site's access log under `/var/log/caddy/` owned by
+`root:root` mode 600. Caddy runs as `caddy`, so the subsequent reload failed
+with a permission error — while the existing sites kept serving happily on the
+old config, which is why it was not obvious. Deleting the file fixed it.
+Validate as the service user, or expect to clean up after it.
+
+## Still not covered
+
+- **The reset alarm has still never been seen firing.** Unchanged across all
+  three runs, and now the only headline feature without an end-to-end
+  observation. It needs five hours of elapsed time with the app installed
+  against the live relay, which it now has.
+- **A real at-the-wall response.** Unchanged.
+- **The `/usage` panel comparison.** Unchanged.
+- **A restart of the relay host.** The unit is enabled and `Restart=always`,
+  and the reading is persisted, but neither has been through a reboot.
