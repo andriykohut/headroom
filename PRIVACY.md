@@ -65,6 +65,11 @@ to whoever presents its read key. Concretely, that is three percentages,
 three reset times, and the display name of one model — around 500 bytes, held
 in memory and mirrored to one file so a restart does not blank your phone.
 
+Beside the reading it keeps two timestamps: when the reading arrived, and when
+the machine that sent it says it was taken. The second is what lets two of your
+machines push to one relay without the older reading of the two winning. It is
+a clock value, not a record of what you did.
+
 It holds **no credential**, makes **no outbound requests**, and contacts
 Anthropic never. If it is compromised, what leaks is how much of your quota you
 have used.

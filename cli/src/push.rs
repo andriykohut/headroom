@@ -180,7 +180,7 @@ fn deliver(config: &Config, cheap_body: &str) -> Result<String, String> {
         }
     };
 
-    post(&config.relay, &config.secret, &body)?;
+    post(&config.relay, &config.secret, &body, now)?;
     save_state(&path, &state);
     Ok(match (&enriched, state.carried.len()) {
         (Some(_), _) => "fetched the full picture, per-model windows included".into(),
@@ -246,12 +246,15 @@ fn trim(response: &Value) -> Option<Vec<Value>> {
     Some(response.get("limits")?.as_array()?.clone())
 }
 
-fn post(relay: &str, secret: &str, body: &str) -> Result<(), String> {
+fn post(relay: &str, secret: &str, body: &str, observed_at: u64) -> Result<(), String> {
     let url = format!("{}/usage", relay.trim_end_matches('/'));
     let response = agent()
         .post(&url)
         .header("Authorization", format!("Bearer {secret}"))
         .header("Content-Type", "application/json")
+        // Two machines on one account cannot see each other, so each says when
+        // it took the reading and the relay keeps the newer of the two.
+        .header(crate::relay::OBSERVED_AT_HEADER, observed_at.to_string())
         .send(body)
         .map_err(|error| format!("could not reach the relay: {error}"))?;
     let status = response.status().as_u16();

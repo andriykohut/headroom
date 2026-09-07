@@ -56,6 +56,21 @@ const BODY_TIMEOUT: Duration = Duration::from_secs(15);
 /// A ceiling on any single connection, however well-behaved it looks.
 const CONNECTION_LIFETIME: Duration = Duration::from_secs(120);
 
+/// The header a machine stamps its reading with, and the only way the relay
+/// can order two machines that cannot see each other.
+pub const OBSERVED_AT_HEADER: &str = "X-Headroom-Observed-At";
+
+/// How long a reading outranks one observed before it.
+///
+/// A machine that is working pushes every few seconds, so a held reading older
+/// than this means its machine stopped - and a fresh reading from a second
+/// machine is then worth more than a stale one, whatever the two clocks say
+/// about each other. This is the bound on a wrong clock: without it, a machine
+/// running fast would silence the other one for as long as it was wrong, which
+/// is unbounded. The relay measures it on its own clock, so it needs no
+/// agreement between the machines to be right.
+const OUTRANKS_FOR: u64 = 120;
+
 /// Concurrent connections. Two clients need two; the rest is headroom for
 /// retries and overlap. Past this, new connections wait in the kernel's queue
 /// rather than each costing memory.
@@ -66,6 +81,33 @@ pub struct Snapshot {
     /// Exactly what was pushed, kept verbatim.
     pub body: String,
     pub received_at: u64,
+    /// When the machine that pushed it says it saw it. Absent in a file
+    /// written by a relay from before ordering existed, which is why it
+    /// defaults rather than failing the whole file to parse.
+    #[serde(default)]
+    pub observed_at: Option<u64>,
+}
+
+/// A reading arriving from a machine, and when that machine observed it.
+pub struct Push {
+    pub body: String,
+    /// `None` when the pusher did not say: an older `headroom push`, or a
+    /// proxy in front of the relay that dropped the header. Unorderable, and
+    /// for that reason always accepted.
+    pub observed_at: Option<u64>,
+}
+
+impl From<String> for Push {
+    /// A body with nothing said about when it was observed.
+    fn from(body: String) -> Self {
+        Push { body, observed_at: None }
+    }
+}
+
+impl From<&str> for Push {
+    fn from(body: &str) -> Self {
+        body.to_string().into()
+    }
 }
 
 /// What a caller is asking to do. The two are gated by different secrets.
@@ -134,7 +176,7 @@ impl Relay {
         method: &str,
         target: &str,
         authorization: Option<&str>,
-        body: Option<String>,
+        body: Option<Push>,
     ) -> Reply {
         let path = target.split('?').next().unwrap_or("");
         match (method, path) {
@@ -158,9 +200,21 @@ impl Relay {
                 Reply { status: 401, body: error("unauthorised"), age: None }
             }
             ("POST", "/usage") => match body {
-                Some(body) => {
-                    self.store(body);
-                    Reply { status: 204, body: String::new(), age: None }
+                Some(push) => {
+                    if self.store(push) {
+                        return Reply { status: 204, body: String::new(), age: None };
+                    }
+                    // Superseded, which is not the sender's error: it pushed a
+                    // true reading and a newer one simply got here first.
+                    // Saying so in a 2xx keeps it out of the status line's
+                    // error path, and still tells anyone holding a curl what
+                    // happened.
+                    Reply {
+                        status: 200,
+                        body: serde_json::json!({"stored": false, "held": "a newer reading"})
+                            .to_string(),
+                        age: None,
+                    }
                 }
                 None => Reply { status: 400, body: error("empty body"), age: None },
             },
@@ -179,8 +233,23 @@ impl Relay {
         }
     }
 
-    fn store(&self, body: String) {
-        let snapshot = Snapshot { body, received_at: (self.now)() };
+    /// Keep the arriving reading unless the one already held is newer, and
+    /// report which happened.
+    fn store(&self, push: Push) -> bool {
+        let now = (self.now)();
+        // Held across the decision and the write both: two machines can push
+        // in the same instant, and deciding under one lock only to write under
+        // another puts them straight back into the race this is settling. What
+        // it costs is a small file write inside the lock, on a server whose
+        // whole job is one reading.
+        let mut held = lock(&self.snapshot);
+        if let Some(current) = held.as_ref()
+            && !supersedes(push.observed_at, current, now)
+        {
+            return false;
+        }
+        let snapshot =
+            Snapshot { body: push.body, received_at: now, observed_at: push.observed_at };
         // Persisted so a restart does not blank the phone. It holds
         // percentages and reset times - no credential, nothing secret.
         if let Some(parent) = self.state_path.parent() {
@@ -192,8 +261,26 @@ impl Relay {
                 let _ = std::fs::rename(&temporary, &self.state_path);
             }
         }
-        *lock(&self.snapshot) = Some(snapshot);
+        *held = Some(snapshot);
+        true
     }
+}
+
+/// Whether an arriving reading should replace the one held.
+///
+/// Two machines reporting one account cannot be ordered by arrival: a reading
+/// observed earlier can be delivered later, behind a slow request. The pusher's
+/// own clock breaks that tie - but only while the relay can see for itself that
+/// what it holds is current. Past `OUTRANKS_FOR` the held reading is stale, and
+/// a fresh one wins however the two machines' clocks compare.
+fn supersedes(arriving: Option<u64>, held: &Snapshot, now: u64) -> bool {
+    let (Some(arriving), Some(held_at)) = (arriving, held.observed_at) else {
+        // Nothing to order by. Refusing here would turn an unknown into an
+        // outage - an older pusher, or a stripped header, would stop reporting
+        // for as long as anything else kept pushing.
+        return true;
+    };
+    arriving >= held_at || now.saturating_sub(held.received_at) > OUTRANKS_FOR
 }
 
 /// Lock without `unwrap`.
@@ -303,6 +390,11 @@ async fn answer(
         .get(hyper::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let request_observed_at = request
+        .headers()
+        .get(OBSERVED_AT_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
 
     let reply = if method == "POST" {
         // Limited caps what can be read regardless of what Content-Length
@@ -311,8 +403,11 @@ async fn answer(
         match tokio::time::timeout(BODY_TIMEOUT, limited.collect()).await {
             Ok(Ok(collected)) => {
                 let bytes = collected.to_bytes();
-                let body =
-                    String::from_utf8(bytes.to_vec()).ok().filter(|text| !text.trim().is_empty());
+                let observed_at = request_observed_at.and_then(|value| value.parse().ok());
+                let body = String::from_utf8(bytes.to_vec())
+                    .ok()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|body| Push { body, observed_at });
                 relay.handle(&method, &target, authorization.as_deref(), body)
             }
             // Over the cap, malformed, or too slow. All three are the sender's
@@ -369,6 +464,90 @@ mod tests {
 
     fn push(relay: &Relay, body: &str) -> Reply {
         relay.handle("POST", "/usage", Some(&format!("Bearer {WRITE}")), Some(body.into()))
+    }
+
+    /// A push from a machine that says when it saw the reading.
+    fn push_observed(relay: &Relay, body: &str, observed_at: u64) -> Reply {
+        let push = Push { body: body.into(), observed_at: Some(observed_at) };
+        relay.handle("POST", "/usage", Some(&format!("Bearer {WRITE}")), Some(push))
+    }
+
+    fn held(relay: &Relay) -> String {
+        relay.handle("GET", "/usage", Some(&format!("Bearer {READ}")), None).body
+    }
+
+    // --- two machines, one relay ---
+    //
+    // Both report the same account, so their readings are interchangeable -
+    // except in age. Arrival order is not observation order: a slow request on
+    // one machine outlives a fast one on the other, and the phone then shows a
+    // percentage stepping backwards. The pusher's own clock breaks the tie.
+
+    #[test]
+    fn a_reading_observed_earlier_does_not_replace_the_one_held() {
+        let relay = relay();
+        push_observed(&relay, r#"{"limits":[{"percent":42}]}"#, 900);
+        let late = push_observed(&relay, r#"{"limits":[{"percent":41}]}"#, 800);
+        assert_eq!(late.status, 200, "a superseded push is not the sender's error");
+        assert!(held(&relay).contains("42"), "the newer reading was overwritten");
+    }
+
+    #[test]
+    fn a_reading_observed_later_replaces_the_one_held() {
+        let relay = relay();
+        push_observed(&relay, r#"{"limits":[{"percent":41}]}"#, 800);
+        assert_eq!(push_observed(&relay, r#"{"limits":[{"percent":42}]}"#, 900).status, 204);
+        assert!(held(&relay).contains("42"));
+    }
+
+    #[test]
+    fn two_readings_observed_in_the_same_second_take_the_later_arrival() {
+        // One machine pushes several times a second, and those cannot overtake
+        // each other - the lock lets one child run at a time - so within a
+        // second arrival order is the truth.
+        let relay = relay();
+        push_observed(&relay, r#"{"limits":[{"percent":41}]}"#, 900);
+        assert_eq!(push_observed(&relay, r#"{"limits":[{"percent":42}]}"#, 900).status, 204);
+        assert!(held(&relay).contains("42"));
+    }
+
+    #[test]
+    fn a_push_that_carries_no_observed_time_is_still_stored() {
+        // An older `headroom push`, or a proxy that dropped the header. An
+        // ordering we cannot know must not become a refusal to report at all.
+        let relay = relay();
+        push_observed(&relay, r#"{"limits":[{"percent":42}]}"#, 900);
+        assert_eq!(push(&relay, r#"{"limits":[{"percent":7}]}"#).status, 204);
+        assert!(held(&relay).contains("7"));
+    }
+
+    #[test]
+    fn a_held_reading_stops_outranking_once_its_machine_goes_quiet() {
+        // The bound on a wrong clock. A machine whose clock runs ahead would
+        // otherwise silence the other one for as long as it was wrong, which
+        // is unbounded; here it costs at most OUTRANKS_FOR after it stops
+        // pushing. The relay's own clock is what measures that, so it needs no
+        // agreement between the two machines to be right.
+        let mut relay = relay();
+        push_observed(&relay, r#"{"limits":[{"percent":42}]}"#, 9_000);
+        relay.now = || 1_000 + OUTRANKS_FOR + 1;
+        assert_eq!(push_observed(&relay, r#"{"limits":[{"percent":41}]}"#, 800).status, 204);
+        assert!(held(&relay).contains("41"), "a stale reading outranked a fresh one");
+    }
+
+    #[test]
+    fn a_reading_stored_by_an_older_relay_still_loads() {
+        // Upgrading the relay must not blank the phone: the state file on a
+        // running deployment has no observed time in it.
+        let path =
+            std::env::temp_dir().join(format!("headroom-relay-old-{}.json", std::process::id()));
+        std::fs::write(&path, r#"{"body":"{\"limits\":[]}","received_at":900}"#).unwrap();
+        let relay = Relay::new(READ.into(), WRITE.into(), path.clone());
+        assert_eq!(
+            relay.handle("GET", "/usage", Some(&format!("Bearer {READ}")), None).status,
+            200
+        );
+        std::fs::remove_file(&path).ok();
     }
 
     // --- authorisation ---

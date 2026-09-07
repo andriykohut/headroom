@@ -1,7 +1,9 @@
-//! Several Claude Code sessions on one machine, all running the status line.
+//! More than one thing pushing to one relay: several Claude Code sessions on a
+//! machine, and several machines on an account.
 //!
-//! They share a state directory, so they share a lock, and that lock decides
-//! two things worth testing across real processes rather than in one:
+//! Sessions on one machine share a state directory, so they share a lock, and
+//! that lock decides two things worth testing across real processes rather
+//! than in one:
 //!
 //! - Overlapping pushes collapse to a single request. Losing a race here costs
 //!   nothing, because the readings are account-wide: whichever child wins is
@@ -9,6 +11,10 @@
 //! - A child killed mid-request cannot take the lock with it. The lock is
 //!   advisory and the kernel drops it when its holder dies, so the file left
 //!   behind is just a file - not a holder the next child has to wait out.
+//!
+//! Machines share nothing at all, so ordering between them has to travel on
+//! the wire: each push stamps the moment its machine observed the reading, and
+//! the relay keeps the newer of the two.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -109,31 +115,90 @@ fn a_lock_left_behind_by_a_killed_child_does_not_silence_the_next_push() {
 
     push(&format!("http://127.0.0.1:{port}"), &state);
 
-    let (request_line, body) =
+    let request =
         receiver.recv_timeout(Duration::from_secs(10)).expect("the relay was never called");
-    assert!(request_line.starts_with("POST /usage "), "got {request_line:?}");
-    assert!(body.contains("41.6"), "the reading did not survive: {body}");
+    assert!(request.line.starts_with("POST /usage "), "got {:?}", request.line);
+    assert!(request.body.contains("41.6"), "the reading did not survive: {}", request.body);
+}
+
+#[test]
+fn a_push_stamps_the_moment_the_machine_observed_the_reading() {
+    // Two machines cannot see each other's state, so the only way the relay
+    // can tell which of two readings is the newer one is for each to say when
+    // it was taken. Arrival order does not answer that: a slow request on one
+    // machine outlives a fast one on the other.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        if let Ok((stream, _)) = listener.accept() {
+            let _ = sender.send(read_request(stream));
+        }
+    });
+
+    let state = scratch("observed");
+    skip_enrichment(&state);
+    let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    push(&format!("http://127.0.0.1:{port}"), &state);
+
+    let request =
+        receiver.recv_timeout(Duration::from_secs(10)).expect("the relay was never called");
+    let stamp: u64 = request
+        .header("X-Headroom-Observed-At")
+        .expect("a push must say when it observed the reading")
+        .parse()
+        .expect("the stamp must be epoch seconds");
+    let after = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    assert!(
+        (before..=after).contains(&stamp),
+        "the stamp is {stamp}, which is outside the {before}..={after} the push happened in"
+    );
+}
+
+/// One HTTP request, as much of it as these tests need.
+struct Request {
+    line: String,
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+impl Request {
+    /// Header lookup is case-insensitive, as HTTP is.
+    fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers.iter().find(|(key, _)| *key == name).map(|(_, value)| value.as_str())
+    }
 }
 
 /// Read one HTTP request off a socket and answer it, without a server crate.
-fn read_request(mut stream: TcpStream) -> (String, String) {
+fn read_request(mut stream: TcpStream) -> Request {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line).unwrap();
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
 
-    let mut length = 0usize;
+    let mut headers = Vec::new();
     loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).unwrap() == 0 || line.trim().is_empty() {
+        let mut header = String::new();
+        if reader.read_line(&mut header).unwrap() == 0 || header.trim().is_empty() {
             break;
         }
-        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-            length = value.trim().parse().unwrap_or(0);
+        if let Some((key, value)) = header.split_once(':') {
+            headers.push((key.trim().to_ascii_lowercase(), value.trim().to_string()));
         }
     }
+    let length: usize = headers
+        .iter()
+        .find(|(key, _)| key == "content-length")
+        .and_then(|(_, value)| value.parse().ok())
+        .unwrap_or(0);
 
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body).unwrap();
     stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n").unwrap();
-    (request_line.trim().to_string(), String::from_utf8_lossy(&body).into_owned())
+    Request {
+        line: line.trim().to_string(),
+        headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+    }
 }
