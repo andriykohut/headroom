@@ -139,9 +139,18 @@ fn request(
             headers.push((field.trim().to_string(), value.trim().to_string()));
         }
     }
+    // Exactly Content-Length bytes, as an HTTP client must, not "until the
+    // server hangs up". The two differ when the server refuses a request body
+    // part-way (the oversized push): it answers and closes with the rest of
+    // the body unread, and a kernel closing a socket that still holds unread
+    // data sends a reset rather than a FIN. Reading to EOF then fails on the
+    // reset after a complete, correct response has already arrived.
+    let reply = Reply { status, headers, body: String::new() };
+    let length: u64 = reply.header("Content-Length").map_or(0, |value| value.parse().unwrap());
     let mut body = String::new();
-    reader.read_to_string(&mut body).unwrap();
-    Reply { status, headers, body }
+    reader.take(length).read_to_string(&mut body).unwrap();
+    assert_eq!(body.len() as u64, length, "the response body was cut short");
+    Reply { body, ..reply }
 }
 
 const READING: &str = r#"{"limits":[{"kind":"session","percent":41.6,"is_active":true}]}"#;
