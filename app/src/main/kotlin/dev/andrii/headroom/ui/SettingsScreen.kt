@@ -108,7 +108,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(32.dp))
 
             Text(
-                "Linked account",
+                "Relay",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -129,8 +129,8 @@ fun SettingsScreen(
             title = { Text("Unlink this phone?") },
             text = {
                 Text(
-                    "Headroom will forget the saved credential and stop updating. " +
-                        "You can link again by scanning a new code.",
+                    "Headroom will forget your relay's address and key, and stop " +
+                        "updating. You can link again by scanning a new code.",
                 )
             },
             confirmButton = {

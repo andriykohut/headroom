@@ -1,6 +1,5 @@
 package dev.andrii.headroom.data
 
-import dev.andrii.headroom.credential.RefreshFailedException
 import dev.andrii.headroom.domain.BucketKind
 import dev.andrii.headroom.domain.LimitBucket
 import dev.andrii.headroom.domain.UsageSnapshot
@@ -28,7 +27,7 @@ class InMemorySnapshotCache(private var snapshot: UsageSnapshot? = null) : Snaps
 class UsageRepositoryTest {
 
     private fun repository(
-        fetch: suspend (Boolean) -> UsageSnapshot,
+        fetch: suspend () -> UsageSnapshot,
         cache: InMemorySnapshotCache = InMemorySnapshotCache(),
         now: Long = 1_000,
     ) = UsageRepository(
@@ -83,15 +82,15 @@ class UsageRepositoryTest {
     }
 
     @Test
-    fun `a failed refresh flags that a re-link is needed`() = runTest {
-        val state = repository({ throw RefreshFailedException("rejected") }).refresh()
-        assertTrue((state as UsageState.Failed).needsRelink)
+    fun `a rejected key flags that a new code is needed`() = runTest {
+        val state = repository({ throw RelayRejectedException("rejected") }).refresh()
+        assertTrue((state as UsageState.Failed).needsNewCode)
     }
 
     @Test
     fun `an ordinary fetch failure does not demand a re-link`() = runTest {
         val state = repository({ throw UsageFetchException("HTTP 503") }).refresh()
-        assertFalse((state as UsageState.Failed).needsRelink)
+        assertFalse((state as UsageState.Failed).needsNewCode)
     }
 
     @Test

@@ -27,7 +27,7 @@ class DebugPollActivity : ComponentActivity() {
             val summary = runCatching {
                 val result = coordinator.runCycle()
                 "cycle: ${result.notified.size} notified, " +
-                    "relink=${result.relinkNeeded}, next=${result.nextAlarmAt}"
+                    "relink=${result.needsNewCode}, next=${result.nextAlarmAt}"
             }.getOrElse { "cycle failed: ${it::class.simpleName}" }
             // Written as well as toasted: a toast cannot be read back by a
             // script, and the point of the second run is comparing results.

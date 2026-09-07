@@ -21,15 +21,31 @@ jobs:
       # here should not be tested, let alone released.
       - run: ./scripts/check-distribution.sh
 
-  generator:
-    name: Generator tests
+  cli:
+    name: CLI tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          enable-cache: true
-      - run: uv run --directory tools pytest -q
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+      # Includes tests/push_does_not_block.rs, which times the status line hook
+      # against a relay that accepts connections and never answers. That one
+      # guards a promise the user feels on every prompt, so a slow or contended
+      # runner failing it is a signal worth reading, not one worth relaxing.
+      - run: cargo test
 
   app:
     name: App and domain tests

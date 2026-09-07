@@ -1,7 +1,17 @@
 # Security
 
-Headroom holds a live credential for your account. That makes some bugs
-worse than others, and this file is about those.
+Headroom has three parts with very different exposure, and it is worth being
+explicit about which holds what:
+
+| Part | Holds | Worst case if it fails |
+| --- | --- | --- |
+| The **app**, on your phone | Your relay's address and its **read** key | Someone reads your quota usage |
+| The **relay**, on a machine you run | The last usage reading | The same, plus whatever the host itself is worth |
+| The **CLI**, on the machine you code on | Nothing durable; it *reads* Claude Code's access token to make one request | Your Claude credential leaks |
+
+Only the third is account-critical, and it is the one that runs on a machine
+where that credential already lives. The phone deliberately holds nothing that
+can act as you.
 
 ## Reporting a vulnerability
 
@@ -9,29 +19,50 @@ Use GitHub's private reporting: **Security → Report a vulnerability** on this
 repository. It reaches the maintainer without a public issue.
 
 Please do **not** open a public issue for anything that could expose a
-credential. Anyone reading the tracker learns about it at the same moment as
-the person who can fix it.
+credential or a relay secret. Anyone reading the tracker learns about it at the
+same moment as the person who can fix it.
 
 This is a one-person project. Expect an acknowledgement within a week, and a
 fix before any public disclosure — please give it that time.
 
 ## What counts
 
-Anything that could let the credential reach somewhere it should not:
+**Anything that lets Claude Code's access token escape the machine it lives
+on.** This is the sharpest edge in the project:
 
-- A token appearing in a log, a crash report, an error message, a Compose
-  preview, or a notification.
-- Weakness in how the credential is stored (`KeystoreSecureStore`) or sent
-  (only ever to the endpoints inside the payload, over TLS).
-- The generator (`tools/headroom-link`) writing a secret to disk, or printing
-  one anywhere other than the QR and `--text` output the user asked for.
+- `headroom push` sending that token anywhere other than the usage endpoint it
+  read out of the local Claude Code install — including to the relay, which
+  must never see it.
+- The token reaching a log, an error message, a process listing, or the state
+  file in `~/.local/state/headroom/`.
+- `headroom push` *writing* to Claude Code's credential store, or attempting a
+  token refresh. It does neither by design; doing either could invalidate the
+  user's login.
+- The enrichment response reaching the relay untrimmed. Only the `limits` array
+  may travel — see `trim()` in `cli/src/push.rs`, and the check in
+  `scripts/check-distribution.sh` that fails the build if it disappears.
+
+**Anything that lets the relay's shared secret escape**, or be bypassed:
+
+- A non-constant-time comparison in `Relay::authorised`, which would let the
+  secret be recovered one character at a time.
+- An unauthenticated path that returns a reading. `/healthz` is deliberately
+  open and deliberately reports only `ok` and an age.
+- The secret appearing in a log line, a request URL, or a process listing.
+  The relay logs nothing at all, for exactly this reason.
+
+**Anything in the app** that misuses what it does hold:
+
+- The relay secret appearing in a log, a crash report, a Compose preview, or a
+  notification.
+- Weakness in how it is stored (`KeystoreSecureStore`).
 - A crafted QR code or pasted payload causing the app to do something other
   than reject it (`CredentialImport`, `interpretScan`).
-- A request going to any host other than the two carried in the payload.
+- A request going to any host other than the one carried in the payload.
 
-Also welcome, though less urgent: anything in the notification pipeline that
-could make the app poll far more often than intended, since that is what
-gets an account rate-limited or flagged.
+Also welcome, though less urgent: anything that could make the CLI fetch far
+more often than intended, since that is what gets an account rate-limited. The
+five-minute default and the sixty-second floor exist for that reason.
 
 ## What is out of scope
 
@@ -39,16 +70,76 @@ gets an account rate-limited or flagged.
   the endpoint disappearing. Those are documented risks, not vulnerabilities.
 - Whether using the app complies with the provider's terms. The README
   addresses that; it is not a security question.
+- **Denial of service against your own relay.** It is a box you run and expose;
+  put it behind whatever you normally put in front of an HTTP service. Reports
+  that it can be flooded are not interesting.
+
+## Running the relay safely
+
+It speaks plain HTTP and binds to `127.0.0.1` by default. Keep that default and
+put a reverse proxy in front, for two reasons rather than one.
+
+**TLS.** The phone sends the shared secret on every request, usually across the
+open internet. The app refuses cleartext outright, so this is enforced rather
+than advised.
+
+**Slow and idle clients** are handled by the relay itself rather than delegated
+to that proxy: a connection that does not send request headers within
+`--header-timeout` (10s, which also bounds idle keep-alive) is closed, a body
+must arrive within 15s, no connection outlives 120s, and `--max-connections`
+(64) are served at once while the rest wait in the kernel's accept queue.
+Flooded with idle connections it holds at three threads and about 4 MB. This is
+why it runs on hyper: the lighter thread-per-connection server it used first
+exposed no way to set any socket timeout, and the same flood took it to 406
+threads.
+
+## Two keys, not one
+
+The machine that pushes and the phone that reads hold different secrets,
+checked against different roles. This is the difference it makes:
+
+| If this leaks | They can | They cannot |
+| --- | --- | --- |
+| The **read** key (on your phone, in the QR code) | See your usage percentages | Write anything |
+| The **push** key (on the machine you code on) | Overwrite readings | Read them back |
+
+So a photographed QR code or a stolen phone costs you the confidentiality of
+three percentages, and nothing else — it cannot be used to feed you false
+numbers and suppress a limit warning. Either key rotates without touching the
+other.
+
+Passing a single `--secret-file` collapses both roles onto one key. It works,
+and the relay warns on startup, but it gives the phone write access it has no
+use for.
+
+**What an unauthenticated attacker can actually reach:** `/healthz`, which
+reports whether a reading exists and how old it is, and nothing else. `/usage`
+requires the secret in both directions — a `GET` cannot read a reading without
+it and a `POST` cannot overwrite one. The secret is 32 characters from a
+64-symbol alphabet, compared in constant time, so guessing it is not a strategy.
+
+**What the relay cannot do, by construction:** contact Anthropic. It holds no
+credential and imports no HTTP client — `cli/src/relay.rs` has no outbound call
+in it at all. Traffic aimed at your relay costs you CPU and bandwidth on that
+host. It cannot cost you Claude usage, because nothing on that host can spend
+any.
+
+## One thing to know about debug builds
+
+A debug build is `debuggable`, which lets anyone with adb access to an unlocked
+phone run code as the app and read what the Keystore protects. It also permits
+cleartext HTTP, so it can be pointed at a relay on a laptop with no
+certificate.
+
+Debug builds install under a separate application ID (`…​.debug`), so they sit
+alongside a real install rather than replacing it. That makes them convenient
+for exactly this — and it means an old test build can linger on a phone
+unnoticed. **Uninstall it when you are done.**
+
+Releases are built non-debuggable, and the release workflow refuses to publish
+one that is not.
 
 ## Supported versions
 
 The latest release only. Fixes ship as a new release, which Obtainium will
 offer as an update.
-
-## One thing to know about debug builds
-
-A debug build is `debuggable`, which lets anyone with adb access to an
-unlocked phone run code as the app and ask the Keystore to decrypt the
-credential. That is by design in Android and fine on a test device. **Do not
-install a debug build on a phone you actually use.** Releases are built
-non-debuggable, and the release workflow refuses to publish one that is not.

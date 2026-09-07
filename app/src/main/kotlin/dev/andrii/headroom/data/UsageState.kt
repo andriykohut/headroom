@@ -15,6 +15,6 @@ sealed interface UsageState {
     data class Failed(
         val snapshot: UsageSnapshot?,
         val message: String,
-        val needsRelink: Boolean,
+        val needsNewCode: Boolean,
     ) : UsageState
 }

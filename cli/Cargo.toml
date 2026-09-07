@@ -1,0 +1,43 @@
+[package]
+name = "headroom"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Push Claude Code usage from your machine to a Headroom relay, and serve it to the phone"
+license = "Apache-2.0"
+repository = "https://github.com/andriykohut/headroom"
+
+[dependencies]
+# Every dependency here is MIT or Apache-2.0. Nothing copyleft, nothing that
+# would complicate F-Droid or the Play Store; scripts/check-distribution.sh
+# checks this.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Blocking HTTP with rustls. Blocking is deliberate: `push` must start, do one
+# request and exit, and an async runtime would cost more than the request.
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+# hyper, rather than a smaller thread-per-connection server, for one reason:
+# timeouts. A relay on a public host has to be able to hang up on a client that
+# opens a connection and then says nothing, and the lighter options expose no
+# way to set a socket timeout at all. Two worker threads - the work per request
+# is a mutex and a 500-byte write.
+#
+# `push` never builds a runtime, so linking this costs it binary size and not
+# startup time; cli/tests/push_does_not_block.rs is what holds that to account.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio = { version = "1", default-features = false, features = [
+    "rt", "rt-multi-thread", "net", "time", "sync", "io-util",
+] }
+qrcode = { version = "0.14", default-features = false }
+flate2 = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

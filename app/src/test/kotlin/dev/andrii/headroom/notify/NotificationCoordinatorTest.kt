@@ -1,8 +1,8 @@
 package dev.andrii.headroom.notify
 
-import dev.andrii.headroom.credential.RefreshFailedException
 import dev.andrii.headroom.data.InMemorySnapshotCache
 import dev.andrii.headroom.data.NotLinkedException
+import dev.andrii.headroom.data.RelayRejectedException
 import dev.andrii.headroom.data.UsageFetchException
 import dev.andrii.headroom.domain.BucketKind
 import dev.andrii.headroom.domain.LimitBucket
@@ -44,7 +44,7 @@ private fun snapshot(vararg buckets: LimitBucket, at: Long = 1_000) =
 class NotificationCoordinatorTest {
 
     private fun coordinator(
-        fetch: suspend (Boolean) -> UsageSnapshot,
+        fetch: suspend () -> UsageSnapshot,
         log: NotificationLog = InMemoryNotificationLog(),
         notifier: RecordingNotifier = RecordingNotifier(),
         alarms: RecordingAlarmScheduler = RecordingAlarmScheduler(),
@@ -77,7 +77,7 @@ class NotificationCoordinatorTest {
         val log = InMemoryNotificationLog()
         val notifier = RecordingNotifier()
         val cache = InMemorySnapshotCache()
-        val fetch: suspend (Boolean) -> UsageSnapshot =
+        val fetch: suspend () -> UsageSnapshot =
             { snapshot(bucket(BucketKind.SESSION, 95.0)) }
         val (subject, _) = coordinator(fetch, log = log, notifier = notifier, cache = cache)
         subject.runCycle()
@@ -142,23 +142,25 @@ class NotificationCoordinatorTest {
     }
 
     @Test
-    fun `a failed refresh raises a relink notification`() = runTest {
+    fun `a rejected key raises a notification rather than failing silently`() = runTest {
+        // The app cannot fix this itself, and the user will not open it to find
+        // out. Spec section 7: never silent.
         val notifier = RecordingNotifier()
         val (subject, _) = coordinator(
-            { throw RefreshFailedException("rejected") }, notifier = notifier,
+            { throw RelayRejectedException("rejected") }, notifier = notifier,
         )
         val result = subject.runCycle()
-        assertTrue(result.relinkNeeded)
-        assertEquals(1, notifier.relinkMessages.size)
+        assertTrue(result.needsNewCode)
+        assertEquals(1, notifier.rejectionMessages.size)
     }
 
     @Test
-    fun `an ordinary fetch failure notifies nothing and asks for no relink`() = runTest {
+    fun `an ordinary fetch failure notifies nothing and asks for no new code`() = runTest {
         val notifier = RecordingNotifier()
         val (subject, _) = coordinator({ throw UsageFetchException("HTTP 503") }, notifier = notifier)
         val result = subject.runCycle()
-        assertFalse(result.relinkNeeded)
-        assertTrue(notifier.events.isEmpty() && notifier.relinkMessages.isEmpty())
+        assertFalse(result.needsNewCode)
+        assertTrue(notifier.events.isEmpty() && notifier.rejectionMessages.isEmpty())
     }
 
     @Test
@@ -166,7 +168,7 @@ class NotificationCoordinatorTest {
         val notifier = RecordingNotifier()
         val (subject, _) = coordinator({ throw NotLinkedException() }, notifier = notifier)
         subject.runCycle()
-        assertTrue(notifier.events.isEmpty() && notifier.relinkMessages.isEmpty())
+        assertTrue(notifier.events.isEmpty() && notifier.rejectionMessages.isEmpty())
     }
 
     @Test
@@ -187,16 +189,5 @@ class NotificationCoordinatorTest {
         )
         subject.runCycle()
         assertTrue(notifier.events.isEmpty())
-    }
-
-    @Test
-    fun `atWall is passed through to the fetch`() = runTest {
-        var sawAtWall = false
-        val (subject, _) = coordinator({ atWall ->
-            sawAtWall = atWall
-            snapshot(bucket(BucketKind.SESSION))
-        })
-        subject.runCycle(atWall = true)
-        assertTrue(sawAtWall)
     }
 }

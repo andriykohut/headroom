@@ -7,15 +7,15 @@ Run on **2026-09-06**, against a real subscription account.
 | Device | Android emulator, `Medium_Phone_API_35`, 1080×2400 |
 | Android | 15 (API 35) |
 | Build | `:app:assembleDebug`, compileSdk/targetSdk 37, minSdk 31 |
-| Generator | `tools/headroom-link`, Python 3.14 |
+| CLI | `cli/`, Rust 1.94 |
 
 ## Test counts
 
 | Suite | Tests |
 | --- | --- |
 | `:domain:test` | 53 |
-| `:app:testDebugUnitTest` | 116 |
-| `tools` (pytest) | 59 |
+| `:app:testDebugUnitTest` | 110 |
+| `cli` (`cargo test`) | 65 |
 | **Total** | **228** |
 
 All green.
@@ -121,3 +121,78 @@ that nothing warm appears in either theme. Every role is now set.
 - **The `/usage` comparison was made against the API directly**, not against
   Claude Code's own panel. Same source, so it proves the app agrees with the
   wire, not that both agree with what the user is shown elsewhere.
+
+---
+
+# Second run: push and relay
+
+Run on **2026-09-06**, after the architecture changed from credential-on-phone
+to push-and-relay. Against a real subscription account and a **physical
+device** — a Pixel 8a on Android 17 (API 37), not an emulator.
+
+| | |
+| --- | --- |
+| Relay | `headroom serve` on a laptop, `0.0.0.0:8765`, plain HTTP |
+| Pusher | `headroom push` wired into a real `~/.claude/statusline.sh` |
+| App | `:app:assembleDebug`, installed over adb (wireless debugging) |
+
+## What was confirmed
+
+**The whole loop works.** A status line render pushes; the relay stores; the
+app reads and draws three bars — session, current week, and the per-model
+weekly window labelled `Fable`. Verified from both ends: the relay's `/usage`
+response and the app's own screen.
+
+**The two sources agree on reset times.** The status line reported
+`resets_at: 1788733200` (`22:20:00Z`); the usage endpoint, fetched seconds
+later, reported `22:20:00.181Z`. 0.18 s apart, far inside `UsageParser`'s
+rounding to the minute — so alternating between cheap and enriched pushes does
+not mint new `EventKey`s and does not re-notify. Percentages agreed exactly
+(33/33, 23/23).
+
+**The status line is not slowed down.** Release binary, 40 runs against an
+unreachable relay: 2.6 ms median, 3.4 ms worst. Identical against a relay that
+accepts the connection and never answers, which is the case a timeout alone
+does not save you from.
+
+**The enrichment response is trimmed at source.** The live response is ~20 keys
+including unreleased product codenames and a `spend` object. What reached the
+relay was 517 bytes containing only `limits`. Checked by grepping the stored
+bytes for each key that must not travel.
+
+## Three bugs a physical device found that nothing else would have
+
+- **Cleartext HTTP was blocked in the debug build.** `cleartextTrafficPermitted`
+  had been set inside `<debug-overrides>`, which accepts `<trust-anchors>` and
+  nothing else — the attribute was silently ignored and the debug build
+  inherited `false`. OkHttp raised `UnknownServiceException`. Fixed with a
+  variant-specific resource in `app/src/debug/res/xml/`, verified by dumping the
+  compiled XML out of *both* APKs with `aapt2 dump xmltree`, and locked down by
+  a `check-distribution.sh` gate so a permissive config cannot reach `src/main`.
+
+- **The per-model bar flickered and vanished.** The status line fires on every
+  message and carries only two windows; enrichment runs every five minutes and
+  carries three. Each cheap push *replaced* the stored reading, so the `Fable`
+  bar appeared for one push after each fetch and was then destroyed by the next
+  keystroke. Found by a user watching the screen, not by any test. Fixed by
+  having the pusher carry forward the windows the status line cannot produce,
+  with a one-hour ceiling so a broken enrichment yields an absent bar rather
+  than a quietly wrong one.
+
+- **The staleness line measured the wrong thing.** `fetchedAt` was set to the
+  moment of the request. Against a relay that is when the *phone polled*, not
+  when the reading was taken, so an hour-old number would have rendered "just
+  now" and never gone stale. `UsageApi` now dates the snapshot from the relay's
+  `X-Headroom-Age`.
+
+## Still not covered
+
+- **The reset alarm has still never fired in anger.** Unchanged from the first
+  run, and now more load-bearing: the relay only receives readings while you are
+  working, so an overnight reset is first observed by whichever comes first —
+  the alarm, or the next morning's push.
+- **A real at-the-wall response.** Unchanged.
+- **The `/usage` panel comparison.** Unchanged.
+- **A relay reached over the public internet.** Everything above used a laptop
+  relay on a LAN, and finally a loopback tunnel. TLS termination, and the
+  latency and failure modes of a real host, are untested.

@@ -1,6 +1,5 @@
 package dev.andrii.headroom.data
 
-import dev.andrii.headroom.credential.RefreshFailedException
 import dev.andrii.headroom.domain.UsageSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +17,7 @@ interface SnapshotCache {
  * be tested without a mock HTTP engine.
  */
 class UsageRepository(
-    private val fetch: suspend (Boolean) -> UsageSnapshot,
+    private val fetch: suspend () -> UsageSnapshot,
     private val cache: SnapshotCache,
     private val now: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
@@ -29,45 +28,30 @@ class UsageRepository(
     suspend fun lastSnapshot(): UsageSnapshot? =
         (_state.value as? UsageState.Ready)?.snapshot ?: cache.load()
 
-    suspend fun refresh(atWall: Boolean = false): UsageState {
+    suspend fun refresh(): UsageState {
         val next = try {
-            val snapshot = fetch(atWall)
+            val snapshot = fetch()
             cache.store(snapshot)
             // Computed, not assumed false: a fetch can return a reading the
             // server itself dated a while ago, and the UI dims a stale one.
             UsageState.Ready(snapshot, stale = isStale(snapshot))
         } catch (_: NotLinkedException) {
             UsageState.NotLinked
-        } catch (e: RefreshFailedException) {
+        } catch (e: RelayRejectedException) {
             UsageState.Failed(
                 snapshot = cache.load(),
-                message = e.message ?: "Couldn't refresh your credentials.",
-                needsRelink = true,
-            )
-        } catch (e: RateLimitedException) {
-            // Said plainly, and with when it lifts: "HTTP 429" tells the user
-            // nothing they can act on, and the app is going to stay quiet for a
-            // while either way.
-            UsageState.Failed(
-                snapshot = cache.load(),
-                message = rateLimitMessage(e.retryAtEpochSeconds),
-                needsRelink = false,
+                message = e.message ?: "Your relay would not accept this phone's key.",
+                needsNewCode = true,
             )
         } catch (e: UsageFetchException) {
             UsageState.Failed(
                 snapshot = cache.load(),
                 message = e.message ?: "Couldn't read usage.",
-                needsRelink = false,
+                needsNewCode = false,
             )
         }
         _state.value = next
         return next
-    }
-
-    private fun rateLimitMessage(retryAt: Long): String {
-        val minutes = ((retryAt - now()) / 60).coerceAtLeast(1)
-        return "The server is asking for fewer requests. Headroom will try " +
-            "again in about $minutes min."
     }
 
     /** Age of a snapshot in seconds, for the "updated N ago" line. */

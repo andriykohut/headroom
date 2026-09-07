@@ -2,17 +2,16 @@ package dev.andrii.headroom.credential
 
 import dev.andrii.headroom.domain.Credential
 
-class RefreshFailedException(message: String) : Exception(message)
-
 /**
- * Owns the linked credential and keeps it valid.
+ * Owns what the phone was linked with: a relay address and its shared secret.
  *
- * An interface because spec §3 keeps the door open for a second
- * implementation (a registered OAuth client) without touching any consumer.
+ * There is no `refresh`. A relay secret does not expire, and nothing in this
+ * app can mint one - which is the entire reason the phone no longer needs
+ * re-linking every day. When a relay rejects the key, the answer is to scan a
+ * new code, not to renew anything.
  */
 interface CredentialStore {
     suspend fun current(): Credential?
     suspend fun save(credential: Credential)
-    suspend fun refresh(): Credential
     suspend fun clear()
 }

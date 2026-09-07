@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only. This file replaces the strict one in src/main by resource
+  merging, and it exists for a single purpose: pairing against a relay running
+  on a laptop on the same network, where there is no certificate to be had.
+
+  It must never appear in src/main. `cleartextTrafficPermitted` cannot be set
+  from <debug-overrides> - that element carries trust anchors and nothing else -
+  so a variant-specific resource is the only way to scope this to debug, and
+  the only thing keeping release builds strict is that this file lives here.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- So a self-signed relay certificate can be trusted by
+                 installing it, without patching the app. -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

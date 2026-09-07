@@ -160,7 +160,7 @@ stamps in the identical format, which also makes the parser tests deterministic.
 Re-fetch the shape (never commit the output) with:
 
 ```bash
-uv run --directory tools headroom-link --text | <your own inspector>
+headroom link --relay <url> --secret-file <file> --text | <your own inspector>
 ```
 
 ## How to re-verify

@@ -6,9 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import dev.andrii.headroom.credential.CredentialStore
 import dev.andrii.headroom.credential.ImportedCredentialStore
-import dev.andrii.headroom.data.DataStoreRateLimitGate
 import dev.andrii.headroom.data.DataStoreSnapshotCache
-import dev.andrii.headroom.data.RateLimitGate
 import dev.andrii.headroom.data.SnapshotCache
 import dev.andrii.headroom.data.UsageApi
 import dev.andrii.headroom.data.UsageRepository
@@ -36,11 +34,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("h
 val appModule = module {
     single<HttpClient> { HttpClient(OkHttp) }
     single<SecureStore> { KeystoreSecureStore(get()) }
-    single<CredentialStore> { ImportedCredentialStore(get(), get()) }
-    single<RateLimitGate> { DataStoreRateLimitGate(get<Context>().dataStore) }
-    single { UsageApi(get(), get(), get()) }
+    single<CredentialStore> { ImportedCredentialStore(get()) }
+    single { UsageApi(get(), get()) }
     single<SnapshotCache> { DataStoreSnapshotCache(get<Context>().dataStore) }
-    single { UsageRepository(fetch = { atWall -> get<UsageApi>().fetch(atWall) }, cache = get()) }
+    single { UsageRepository(fetch = { get<UsageApi>().fetch() }, cache = get()) }
     single<NotificationLog> { DataStoreNotificationLog(get<Context>().dataStore) }
     single<SettingsStore> { DataStoreSettingsStore(get<Context>().dataStore) }
     single<Notifier> { AndroidNotifier(get()) }
@@ -50,7 +47,7 @@ val appModule = module {
     viewModel { SettingsViewModel(get(), get()) }
     single {
         NotificationCoordinator(
-            fetch = { atWall -> get<UsageApi>().fetch(atWall) },
+            fetch = { get<UsageApi>().fetch() },
             evaluator = get(),
             log = get(),
             notifier = get(),

@@ -92,8 +92,8 @@ fun UsageScreen(
             is UsageState.Failed -> {
                 // Spec §7: say what went wrong, and keep the last reading on
                 // screen rather than blanking it.
-                if (state.needsRelink) {
-                    RelinkPanel(state.message, onLink)
+                if (state.needsNewCode) {
+                    RelayRejectedPanel(state.message, onLink)
                 } else {
                     OfflineStrip(state.message, onRefresh)
                 }
@@ -359,8 +359,8 @@ private fun NotLinkedPanel(onLink: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "On your computer, run /headroom-link in Claude Code. " +
-                    "It prints a code; scan it here and the bars appear.",
+                "On your computer, run /headroom-link. It prints a code that " +
+                    "points this phone at your relay - scan it and the bars appear.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -371,7 +371,7 @@ private fun NotLinkedPanel(onLink: () -> Unit) {
 }
 
 @Composable
-private fun RelinkPanel(message: String, onLink: () -> Unit) {
+private fun RelayRejectedPanel(message: String, onLink: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.errorContainer,
@@ -379,14 +379,15 @@ private fun RelinkPanel(message: String, onLink: () -> Unit) {
     ) {
         Column(Modifier.padding(20.dp)) {
             Text(
-                "Re-link needed",
+                "Your relay refused this phone",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "The saved credential stopped working, so usage can't be updated.\n$message",
+                "Your relay would not accept this phone's key, so usage can't be " +
+                    "updated.\n$message",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
