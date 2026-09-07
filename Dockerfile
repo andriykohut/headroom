@@ -28,8 +28,11 @@ ENV HOME=/data
 # Now safe rather than harmful: /data already exists in the image, owned by
 # 65534:65534, so a container engine that materializes an anonymous volume
 # here inherits that ownership instead of creating a fresh root-owned
-# mount point. Declared so state survives an image upgrade even for an
-# operator who never mounts anything of their own.
+# mount point. That keeps state across a `docker restart` or under Compose.
+# It does NOT survive a `docker run` upgrade (remove the old container, run
+# a new one) - that mints a fresh anonymous volume and orphans the old one.
+# An operator who needs state to survive an upgrade should name the volume
+# explicitly (`-v headroom-data:/data`), which does persist across runs.
 VOLUME /data
 
 # Not root. The systemd unit in the README already runs the relay under

@@ -133,34 +133,79 @@ jobs:
           mkdir -p dist/data
 
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # A broken image must never reach ghcr before something has checked it.
+      # Buildx cannot `load` a multi-platform build into the local engine, so
+      # this is the runner's own architecture only, kept off the registry
+      # (push: false), and tested right here. The buildx builder set up above
+      # persists for the rest of the job, so the real multi-arch build below
+      # reuses this one's cached layers rather than starting cold.
+      - name: Build a local, single-arch image to smoke test before anything is public
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.version.outputs.version }}
-            ghcr.io/${{ github.repository }}:latest
+          load: true
+          push: false
+          tags: headroom-smoke-test
 
-      - name: Smoke test what was just published
+      - name: Smoke test the freshly built image
         run: |
           docker run -d --name relay -p 8765:8765 \
             -e HEADROOM_RELAY_SECRET=smoke-test \
-            ghcr.io/${{ github.repository }}:${{ needs.version.outputs.version }}
+            headroom-smoke-test
           for _ in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:8765/healthz > health.json; then break; fi
             sleep 0.5
           done
           cat health.json
           grep -q '"ok":false' health.json
-          docker rm -f relay
+
+      - name: Diagnose a failed smoke test
+        if: failure()
+        run: |
+          docker ps -a
+          docker logs relay
+
+      - name: Stop the smoke-test container
+        if: always()
+        run: docker rm -f relay 2>/dev/null || true
+
+      # latest must move only for a real release. A throwaway prerelease tag
+      # like v0.0.1-rc1 (the plan's own verification tag) must not repoint
+      # latest at a release candidate - especially since deleting that
+      # package version afterwards removes the manifest both tags share,
+      # leaving no `latest` behind at all. A dash marks a prerelease
+      # (v1.0.0-beta.2, v0.0.1-rc1); a bare vX.Y.Z has none.
+      - name: Decide which tags this build gets
+        id: tags
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          tags="ghcr.io/${REPO}:${VERSION}"
+          case "$VERSION" in
+            *-*) : ;;  # prerelease (e.g. v0.0.1-rc1): version tag only
+            *) tags="$(printf '%s\nghcr.io/%s:latest' "$tags" "$REPO")" ;;
+          esac
+          {
+            echo "tags<<TAGS_EOF"
+            echo "$tags"
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the multi-arch image, now that it has been tested
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
 
   release:
     name: Build and publish a signed APK
