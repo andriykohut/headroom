@@ -29,21 +29,43 @@ is not that backup.
 
 ## Cutting a release
 
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+The tag drives everything, but `cargo publish` reads `cli/Cargo.toml`, so the
+manifest has to be bumped before the tag exists — `scripts/check-version.sh`
+fails the release if they disagree.
 
-That is the whole process. The workflow runs the distribution checks, runs both
-test suites, builds, verifies the APK is signed and **not** debuggable, and
-attaches `headroom-<tag>.apk` to a GitHub release.
+1. Bump `version` in `cli/Cargo.toml`.
+2. Commit it: `git commit -am "Release vX.Y.Z"`.
+3. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 
-The version is derived from the tag rather than stored in the build file, so
-`v0.2.0` produces `versionName 0.2.0` and `versionCode 200`. Nothing to
-remember to bump, and nothing to get out of step.
+The workflow then checks the versions agree, builds four binaries on native
+runners, checksums them, builds and smoke-tests the container, publishes the
+GitHub release with the APK and the binaries, and publishes the crate last —
+a crates.io version cannot be unpublished, so it goes after every other gate.
 
-Tags must be `vMAJOR.MINOR.PATCH`. Anything else builds with the fallback
-version, which Obtainium will not see as an update.
+Needs two secrets beyond the APK signing keys: `CRATES_IO_TOKEN`, and the
+built-in `GITHUB_TOKEN` for ghcr.io.
+
+Tags must be `vMAJOR.MINOR.PATCH`, optionally with a `-` suffix for a
+prerelease (`v0.0.1-rc1`). Anything that fails that shape builds the app with
+its `0.1.0` fallback version, which Obtainium will not see as an update.
+
+A version containing `-` publishes only its own image tag on ghcr.io; `latest`
+moves only for a release without one. Deleting a prerelease's package version
+afterwards would otherwise remove a manifest `latest` still pointed at, so a
+release candidate is never allowed to move it in the first place.
+
+**The first release makes a GHCR package that is private by default.** Nobody
+but you can `docker pull` the image until you make it public, on the
+repository's **Packages** page (Package settings → Change visibility). The
+workflow's smoke test cannot catch this — the runner that builds and tests the
+image is already authenticated to it, so an unauthenticated stranger's `docker
+pull` failing is invisible from inside the pipeline. Check it after the first
+release, not before every one.
+
+**A rehearsal tag such as `v0.0.1-rc1` builds an APK with `versionName
+0.1.0`, not `0.0.1-rc1`.** Expected, not a fault: `app/build.gradle.kts`'s
+version regex accepts only `x.y.z`, and a prerelease suffix does not match it.
+Nothing to chase there.
 
 ## What the workflow refuses to publish
 

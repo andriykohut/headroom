@@ -280,6 +280,8 @@ jobs:
           } > keystore.properties
 
       - name: Build the release APK
+        env:
+          HEADROOM_VERSION: ${{ needs.version.outputs.version }}
         run: ./gradlew :app:assembleRelease
 
       # Obtainium tracks a repository's releases and matches assets by name, so

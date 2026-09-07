@@ -18,7 +18,13 @@ val keystoreProperties = Properties().apply {
 // Obtainium decides whether an update exists by comparing versionName between
 // releases, so a tagged build has to carry the tag's version rather than
 // whatever was last hardcoded here. Local builds keep the fallback.
-val taggedVersion: String? = System.getenv("GITHUB_REF_NAME")
+// HEADROOM_VERSION wins: GITHUB_REF_NAME is the Actions runtime's name for the
+// ref that TRIGGERED the run, and no actions/checkout `ref:` override changes
+// it. Under workflow_dispatch that is the branch the run was launched from,
+// not the tag typed into the input, so the release workflow sets
+// HEADROOM_VERSION explicitly and this falls back to GITHUB_REF_NAME only for
+// a plain tag push or a local build, where the two already agree.
+val taggedVersion: String? = (System.getenv("HEADROOM_VERSION") ?: System.getenv("GITHUB_REF_NAME"))
     ?.removePrefix("v")
     ?.takeIf { Regex("""^\d+\.\d+\.\d+$""").matches(it) }
 

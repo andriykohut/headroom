@@ -88,16 +88,80 @@ Code's credential and the two clients fought over a rotating refresh chain. See
 [Obtainium](https://github.com/ImranR98/Obtainium) at this repository and let it
 handle updates. Android 12 or newer.
 
-**The CLI.** One binary, `headroom`, with three subcommands. Build it from a
-clone:
+**The CLI.** One binary, `headroom`, with three subcommands. You need it in two
+places: on the machine you code on (`push`, `link`) and on whatever always-on
+box runs the relay (`serve`). They can be the same machine if that machine is
+always on.
 
 ```bash
-cargo install --path cli
+curl -fsSL https://raw.githubusercontent.com/andriykohut/headroom/main/scripts/install.sh | sh
 ```
 
-You need it in two places: on the machine you code on (`push`, `link`) and on
-whatever always-on box runs the relay (`serve`). They can be the same machine if
-that machine is always on.
+It installs to `~/.local/bin`, needs no `sudo`, and verifies a SHA-256 checksum
+before it installs anything. Set `HEADROOM_INSTALL_DIR` to put it elsewhere.
+
+If you would rather not pipe a script to a shell — reasonable — do it by hand.
+Pick your target from the [release assets](../../releases/latest):
+
+```bash
+target=aarch64-apple-darwin   # or x86_64-apple-darwin,
+                              # x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+base=https://github.com/andriykohut/headroom/releases/latest/download
+curl -fsSLO "$base/headroom-$target"
+curl -fsSLO "$base/SHA256SUMS"
+shasum -a 256 --ignore-missing --check SHA256SUMS   # sha256sum on Linux
+chmod +x "headroom-$target" && mv "headroom-$target" ~/.local/bin/headroom
+```
+
+With a Rust toolchain (1.89 or newer) you can build it instead. The crate is
+`headroom-cli`; the command it installs is `headroom`:
+
+```bash
+cargo install headroom-cli
+```
+
+For the relay box specifically, there is an image — one static binary on
+`scratch`, no shell, no package manager:
+
+```bash
+chown 65534:65534 /etc/headroom   # see why, just below
+docker run -v /etc/headroom:/keys -v headroom-data:/data \
+  -p 127.0.0.1:8765:8765 \
+  ghcr.io/andriykohut/headroom \
+  serve --push-secret-file /keys/push-key --read-secret-file /keys/read-key
+```
+
+The image binds `0.0.0.0` rather than the binary's loopback default, because
+loopback inside a container is unreachable even from your reverse proxy. Publish
+the port to `127.0.0.1` as above and keep TLS in front of it, exactly as with
+the binary.
+
+State lands at `/data/.local/state/headroom/relay.json` — the image sets
+`HOME=/data`. Use a **named** volume (`headroom-data`, above), not a bare
+`docker run` with no `-v`: an unnamed mount becomes an anonymous volume, and
+`docker rm` followed by a fresh `docker run` on upgrade orphans it, losing
+every reading. A named volume survives that. If you bind-mount a host
+directory instead of a named volume, Docker will not `chown` it for you — it
+must already be writable by uid 65534, or the relay's writes silently do
+nothing; the state write is best-effort and reports no error.
+
+The `chown` above matters for the same reason: the container runs as uid
+65534, and the keys directory is a bind mount, which the image's own
+`--chown` (that gives `/data` to uid 65534) does not reach. If you `chmod 600`
+those key files as [the relay setup below](#1-the-relay) recommends, a
+root-owned, mode-0600 key is unreadable to uid 65534 — and the binary then
+reports no shared secret was configured, even though you passed both key
+flags, because it cannot tell "you gave me nothing" from "I was refused
+permission to read what you gave me."
+
+> Downloading through a browser rather than `curl` puts macOS's quarantine flag
+> on the file, and Gatekeeper will refuse to run it. `xattr -d
+> com.apple.quarantine ./headroom` clears it. The binaries are ad-hoc signed,
+> which is what Apple Silicon requires to execute them, but they are not
+> notarized.
+
+Building from a clone still works, and is what contributors want:
+`cargo install --path cli`.
 
 > Not on Google Play or F-Droid yet. Every dependency is open source, so
 > F-Droid is possible — it just has not been submitted.
