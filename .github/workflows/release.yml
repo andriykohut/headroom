@@ -13,8 +13,85 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    name: Tag and manifest must agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-version.sh "${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+
+  binaries:
+    name: Build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Native runners throughout. A macOS binary cross-compiled from
+          # Linux carries no signature and Apple Silicon refuses to execute
+          # it at all; building on macOS gets the linker's ad-hoc signature
+          # for free. And aarch64-musl avoids cross-compiling ring.
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Name it after its target
+        run: cp cli/target/${{ matrix.target }}/release/headroom headroom-${{ matrix.target }}
+
+      - name: It must run, and say the version being released
+        # Every target is built on a runner of its own architecture, so every
+        # one of them can be executed here rather than by whoever downloads it.
+        run: |
+          ./headroom-${{ matrix.target }} --version
+          ./headroom-${{ matrix.target }} --version | grep -q "${GITHUB_REF_NAME#v}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: headroom-${{ matrix.target }}
+          if-no-files-found: error
+
+  checksums:
+    name: Checksum every asset
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+      # GNU coreutils sha256sum, not macOS shasum: scripts/install.sh matches
+      # "<hash>  <basename>" with the basename anchored at end-of-line, and
+      # shasum's "SHA256 (name) = hash" format would break every install.
+      - run: sha256sum headroom-* | tee SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: |
+            headroom-*
+            SHA256SUMS
+          if-no-files-found: error
+
   release:
     name: Build and publish a signed APK
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
