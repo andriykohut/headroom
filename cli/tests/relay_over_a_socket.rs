@@ -31,22 +31,22 @@ fn start(name: &str) -> Relay {
     let secret_file = directory.join("secret");
     std::fs::write(&secret_file, &secret).unwrap();
 
-    // Let the OS pick a free port rather than deriving one from the process id.
-    // Seven of these run in parallel, and a derived port can collide both
-    // between tests in one run and between concurrent runs on a shared machine
-    // - which is how this first failed on CI, as an unexplained startup
-    // timeout. Binding and immediately dropping leaves a small race; the
-    // generous readiness deadline below is what covers it.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("find a free port")
-        .local_addr()
-        .unwrap()
-        .port();
+    // The relay picks its own port and says which in its log. This test must
+    // not bind a throwaway listener to find a free port first: seven of these
+    // start at once, and on macOS a socket is created and then marked
+    // close-on-exec in two steps while `Command::spawn` copies every
+    // descriptor not yet marked. A sibling's relay then inherits the
+    // throwaway listener, so the port stays bound after this thread drops it,
+    // this test's relay cannot bind, and every request queues on a listener
+    // nobody accepts from - until the sibling's test ends and kills its relay,
+    // which resets them all. That was the "connection reset by peer" that only
+    // showed under parallel load.
+    //
     // Kept, so a startup failure reads as a startup failure rather than a
     // timeout with no explanation.
     let log = directory.join("relay.log");
     let process = Command::new(env!("CARGO_BIN_EXE_headroom"))
-        .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
+        .args(["serve", "--host", "127.0.0.1", "--port", "0"])
         .args(["--secret-file", secret_file.to_str().unwrap()])
         .args(["--state", directory.join("relay.json").to_str().unwrap()])
         // Short, so the slow-client test does not cost ten seconds. Everything
@@ -56,20 +56,36 @@ fn start(name: &str) -> Relay {
         .stderr(Stdio::from(std::fs::File::create(&log).expect("open the relay log")))
         .spawn()
         .expect("start the relay");
+    let mut relay = Relay { process, port: 0, secret };
 
-    let relay = Relay { process, port, secret };
     // Generous on purpose: a CI runner starting seven of these at once is far
     // slower than a laptop starting one, and a flaky harness costs more than a
     // slow one.
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        let stderr = std::fs::read_to_string(&log).unwrap_or_default();
+        if let Some(port) = listening_port(&stderr) {
+            relay.port = port;
             return relay;
+        }
+        if let Some(Ok(status)) = relay.process.try_wait().transpose() {
+            panic!("the relay exited with {status} before listening. Its stderr said: {stderr}");
         }
         std::thread::sleep(Duration::from_millis(25));
     }
     let stderr = std::fs::read_to_string(&log).unwrap_or_default();
-    panic!("the relay never listened on {port}. Its stderr said: {stderr}");
+    panic!("the relay never said it was listening. Its stderr said: {stderr}");
+}
+
+/// The port from the relay's "serving on" line, which it prints only once it
+/// is accepting connections.
+fn listening_port(stderr: &str) -> Option<u16> {
+    stderr.lines().find_map(|line| {
+        line.strip_prefix("headroom: serving on http://127.0.0.1:")?
+            .strip_suffix("/usage")?
+            .parse()
+            .ok()
+    })
 }
 
 struct Reply {

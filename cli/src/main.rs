@@ -75,6 +75,8 @@ enum Commands {
         /// HTTP; put a TLS terminator in front of it.
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
+        /// 0 asks the kernel for a free port; the one chosen is in the
+        /// "serving on" line, which is printed once it is listening.
         #[arg(long, default_value_t = 8765)]
         port: u16,
         /// One key for both reading and writing.
@@ -189,13 +191,19 @@ fn dispatch() -> i32 {
                 );
             }
             let state = state.unwrap_or_else(default_relay_state);
-            eprintln!("headroom: serving on http://{host}:{port}/usage");
+            // Printed by the relay once it is listening, not here before it
+            // tries: a bind that fails must not leave a log that says it
+            // worked.
+            let announce = |address: std::net::SocketAddr| {
+                eprintln!("headroom: serving on http://{address}/usage");
+            };
             match relay::serve(
                 relay::Relay::new(read, write, state),
                 &host,
                 port,
                 max_connections,
                 std::time::Duration::from_secs(header_timeout.max(1)),
+                announce,
             ) {
                 Ok(()) => 0,
                 Err(error) => fail(&error),
