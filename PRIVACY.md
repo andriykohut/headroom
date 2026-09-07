@@ -13,7 +13,7 @@ There are three pieces, and it is worth being clear about which is which:
 
 | Piece | Runs where | Holds |
 | --- | --- | --- |
-| The **app** | Your phone | The relay's address and shared secret |
+| The **app** | Your phone | The relay's address and its read-only key |
 | The **relay** (`headroom serve`) | A machine you control | The last usage reading |
 | The **CLI** (`headroom push`) | The machine you code on | Nothing; it reads and forwards |
 
@@ -21,7 +21,7 @@ There are three pieces, and it is worth being clear about which is which:
 
 | Data | Where | Why |
 | --- | --- | --- |
-| Your relay's address and its shared secret | Encrypted with a non-exportable key in the Android Keystore; ciphertext in the app's private storage | To read your usage from the relay |
+| Your relay's address and its read-only key | Encrypted with a non-exportable key in the Android Keystore; ciphertext in the app's private storage | To read your usage from the relay |
 | The last usage reading | App-private storage | So the screen shows something while offline, and so the next reading can be compared with the last |
 | Which notifications have already fired | App-private storage | So none fires twice |
 | Your notification settings and warning threshold | App-private storage | They are your settings |
@@ -30,9 +30,9 @@ All of it is deleted when you unlink the phone (Settings → Unlink this phone)
 or uninstall the app.
 
 **The phone holds no Claude credential.** It cannot read your account, act as
-you, or renew anything. Someone who takes your unlocked phone learns what
-fraction of your quota you have used and can write false readings to your
-relay. That is the whole of it.
+you, or renew anything. Its key is read-only, so it cannot even overwrite a
+reading on your own relay. Someone who takes your unlocked phone learns what
+fraction of your quota you have used. That is the whole of it.
 
 ## What leaves the device
 
@@ -61,7 +61,7 @@ Specifically, there is **no**:
 ## The relay you run
 
 `headroom serve` keeps the most recent reading pushed to it and hands it back
-to whoever presents the shared secret. Concretely, that is three percentages,
+to whoever presents its read key. Concretely, that is three percentages,
 three reset times, and the display name of one model — around 500 bytes, held
 in memory and mirrored to one file so a restart does not blank your phone.
 

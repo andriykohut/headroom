@@ -63,6 +63,13 @@ enum Commands {
 
     /// Run the relay. Keeps the last reading pushed to it and serves it to the
     /// phone. Holds no credential and never contacts the provider.
+    ///
+    /// Two keys, ideally. The machine you code on needs to write and never
+    /// read; your phone needs to read and never write. Giving each only what
+    /// it needs means a photographed QR code leaks your usage figures without
+    /// letting anyone forge them, and either key can be rotated on its own.
+    /// A single --secret-file uses one key for both: simpler, and weaker.
+    #[command(verbatim_doc_comment)]
     Serve {
         /// Bind address. The default is loopback because this speaks plain
         /// HTTP; put a TLS terminator in front of it.
@@ -70,27 +77,49 @@ enum Commands {
         host: String,
         #[arg(long, default_value_t = 8765)]
         port: u16,
+        /// One key for both reading and writing.
         #[arg(long, env = "HEADROOM_RELAY_SECRET", hide_env_values = true)]
         secret: Option<String>,
+        /// The same, from a file, so it is not in your shell history.
         #[arg(long)]
         secret_file: Option<PathBuf>,
+        /// The key the machine you code on pushes with. Write only.
+        #[arg(long)]
+        push_secret_file: Option<PathBuf>,
+        /// The key your phone reads with. Read only - it cannot overwrite a
+        /// reading, so a lost phone cannot feed you false numbers.
+        #[arg(long)]
+        read_secret_file: Option<PathBuf>,
         /// Where to keep the last reading across restarts.
         #[arg(long)]
         state: Option<PathBuf>,
-        #[arg(long, default_value_t = 4)]
-        workers: usize,
-        /// Print a fresh secret and exit.
+        /// Connections served at once. Past this, new ones wait in the
+        /// kernel's queue rather than each costing memory.
+        #[arg(long, default_value_t = relay::DEFAULT_MAX_CONNECTIONS)]
+        max_connections: usize,
+        /// Seconds a connection may take to send its request headers, which
+        /// is also how long an idle keep-alive connection is kept. Lower it if
+        /// you are not behind a proxy that already does this.
+        #[arg(long, default_value_t = relay::HEADER_TIMEOUT.as_secs())]
+        header_timeout: u64,
+        /// Print a fresh secret and exit. Run it twice for two keys.
         #[arg(long)]
         new_secret: bool,
     },
 
     /// Print a QR code that points the Headroom app at your relay.
+    ///
+    /// Give it the *read* key. The phone never needs to write, and a code that
+    /// cannot write is one you can hold up to a camera in a room with other
+    /// people in it.
+    #[command(verbatim_doc_comment)]
     Link {
         #[arg(long, env = "HEADROOM_RELAY_URL")]
         relay: String,
         #[arg(long, env = "HEADROOM_RELAY_SECRET", hide_env_values = true)]
         secret: Option<String>,
-        #[arg(long)]
+        /// The relay's read key.
+        #[arg(long, alias = "read-secret-file")]
         secret_file: Option<PathBuf>,
         /// Print the raw payload instead of a QR code, for manual paste.
         #[arg(long)]
@@ -119,7 +148,18 @@ fn dispatch() -> i32 {
             }
         }
 
-        Commands::Serve { host, port, secret, secret_file, state, workers, new_secret } => {
+        Commands::Serve {
+            host,
+            port,
+            secret,
+            secret_file,
+            push_secret_file,
+            read_secret_file,
+            state,
+            max_connections,
+            header_timeout,
+            new_secret,
+        } => {
             if new_secret {
                 return match relay::new_secret() {
                     Ok(secret) => {
@@ -129,15 +169,34 @@ fn dispatch() -> i32 {
                     Err(error) => fail(&error),
                 };
             }
-            let Some(secret) = read_secret(secret, secret_file) else {
+            let shared = read_secret(secret, secret_file);
+            let write = read_secret(None, push_secret_file).or_else(|| shared.clone());
+            let read = read_secret(None, read_secret_file).or_else(|| shared.clone());
+            let (Some(write), Some(read)) = (write, read) else {
                 return fail(
-                    "no shared secret: set HEADROOM_RELAY_SECRET or pass --secret-file. \
-                     Generate one with --new-secret.",
+                    "no shared secret: set HEADROOM_RELAY_SECRET, or pass --secret-file, \
+                     or pass both --push-secret-file and --read-secret-file. Generate \
+                     keys with --new-secret.",
                 );
             };
+            if write == read {
+                // Not refused - one key is a legitimate simple setup - but it
+                // is the weaker one, and worth saying once rather than never.
+                eprintln!(
+                    "headroom: one key for both reading and writing. Pass \
+                     --push-secret-file and --read-secret-file to give your phone a key \
+                     that cannot overwrite readings.",
+                );
+            }
             let state = state.unwrap_or_else(default_relay_state);
             eprintln!("headroom: serving on http://{host}:{port}/usage");
-            match relay::serve(relay::Relay::new(secret, state), &host, port, workers) {
+            match relay::serve(
+                relay::Relay::new(read, write, state),
+                &host,
+                port,
+                max_connections,
+                std::time::Duration::from_secs(header_timeout.max(1)),
+            ) {
                 Ok(()) => 0,
                 Err(error) => fail(&error),
             }

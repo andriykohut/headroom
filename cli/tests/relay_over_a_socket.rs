@@ -42,6 +42,9 @@ fn start(name: &str) -> Relay {
         .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
         .args(["--secret-file", secret_file.to_str().unwrap()])
         .args(["--state", directory.join("relay.json").to_str().unwrap()])
+        // Short, so the slow-client test does not cost ten seconds. Everything
+        // else here completes far inside it.
+        .args(["--header-timeout", "1"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -190,4 +193,47 @@ fn concurrent_readers_do_not_deadlock_each_other() {
         }
     });
     assert!(started.elapsed() < Duration::from_secs(10), "readers took {:?}", started.elapsed());
+}
+
+#[test]
+fn a_client_that_connects_and_says_nothing_is_hung_up_on() {
+    // The reason for moving off a thread-per-connection server with no socket
+    // timeout. Previously this connection was held for as long as the client
+    // cared to hold it, and each one cost a thread; measured at 400 idle
+    // connections it reached 406 threads. Now the server closes it.
+    let relay = start("slowloris");
+    let mut stream = TcpStream::connect(("127.0.0.1", relay.port)).expect("connect");
+    stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: x\r\n").unwrap(); // no final CRLF
+    stream.flush().unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+
+    let started = Instant::now();
+    let mut sink = Vec::new();
+    // Reading to EOF returns when the server hangs up. If it never does, the
+    // socket read timeout above fires instead and this fails.
+    let outcome = stream.read_to_end(&mut sink);
+    let elapsed = started.elapsed();
+
+    assert!(outcome.is_ok(), "the server never closed an idle connection: {outcome:?}");
+    assert!(elapsed < Duration::from_secs(6), "took {elapsed:?} to hang up");
+
+    // And the relay is still serving everyone else afterwards.
+    assert_eq!(request(&relay, "GET", "/healthz", None, None).status, 200);
+}
+
+#[test]
+fn many_idle_connections_do_not_stop_it_serving() {
+    let relay = start("flood");
+    let mut held = Vec::new();
+    for _ in 0..80 {
+        if let Ok(stream) = TcpStream::connect(("127.0.0.1", relay.port)) {
+            let _ = (&stream).write_all(b"GET /healthz HTTP/1.1\r\n");
+            held.push(stream);
+        }
+    }
+    assert!(held.len() >= 64, "only opened {} connections", held.len());
+    // Past --max-connections these queue in the kernel rather than becoming
+    // tasks, and the ones already accepted are on a timer. A legitimate caller
+    // still gets served.
+    assert_eq!(request(&relay, "GET", "/healthz", None, None).status, 200);
 }

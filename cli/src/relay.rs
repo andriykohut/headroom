@@ -16,17 +16,50 @@
 //!
 //! It serves back exactly the bytes it was given, so the app's parser is
 //! unchanged and this cannot quietly reinterpret anything.
+//!
+//! **Two keys, not one.** The machine that pushes and the phone that reads hold
+//! different secrets, because they need different powers: one writes and never
+//! reads, the other reads and never writes. A phone that is lost or a QR code
+//! that is photographed therefore leaks your usage figures but cannot forge
+//! them, and either key can be rotated without touching the other.
 
+use http_body_util::{BodyExt, Full, Limited};
+use hyper::body::{Bytes, Incoming};
+use hyper::service::service_fn;
+use hyper::{Request, Response, StatusCode};
+use hyper_util::rt::{TokioIo, TokioTimer};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tiny_http::{Header, Request, Response, Server};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 
 /// A usage reading is a few kilobytes. Anything approaching this is a mistake
 /// or an attempt to fill the disk, and neither deserves the memory.
 const MAX_BODY: usize = 256 * 1024;
+
+/// How long a connection may take to send request headers.
+///
+/// This is the slow-client defence, and it covers idle keep-alive too: a
+/// connection waiting to send its next request is one that has not sent
+/// headers yet. Without it, opening a socket and saying nothing costs the
+/// server a connection for as long as the client cares to hold it - which is
+/// exactly what the previous server could not prevent.
+pub const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long the body of a push may take to arrive, once its headers have.
+const BODY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A ceiling on any single connection, however well-behaved it looks.
+const CONNECTION_LIFETIME: Duration = Duration::from_secs(120);
+
+/// Concurrent connections. Two clients need two; the rest is headroom for
+/// retries and overlap. Past this, new connections wait in the kernel's queue
+/// rather than each costing memory.
+pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -35,8 +68,18 @@ pub struct Snapshot {
     pub received_at: u64,
 }
 
+/// What a caller is asking to do. The two are gated by different secrets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    /// Read the stored reading. This is what the phone holds.
+    Read,
+    /// Replace it. This is what the machine you code on holds.
+    Write,
+}
+
 pub struct Relay {
-    secret: String,
+    read_secret: String,
+    write_secret: String,
     snapshot: Mutex<Option<Snapshot>>,
     state_path: PathBuf,
     now: fn() -> u64,
@@ -52,19 +95,33 @@ pub struct Reply {
 }
 
 impl Relay {
-    pub fn new(secret: String, state_path: PathBuf) -> Self {
+    pub fn new(read_secret: String, write_secret: String, state_path: PathBuf) -> Self {
         let snapshot = std::fs::read_to_string(&state_path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok());
-        Relay { secret, snapshot: Mutex::new(snapshot), state_path, now: unix_time }
+        Relay {
+            read_secret,
+            write_secret,
+            snapshot: Mutex::new(snapshot),
+            state_path,
+            now: unix_time,
+        }
     }
 
     /// Constant-time, so a wrong secret cannot be found one character at a time.
-    fn authorised(&self, header: Option<&str>) -> bool {
+    ///
+    /// Each access is checked against its own secret. Presenting the phone's
+    /// key to a `POST` fails exactly as presenting a stranger's would - the
+    /// point of holding two is that neither is a master key.
+    fn authorised(&self, header: Option<&str>, access: Access) -> bool {
+        let expected = match access {
+            Access::Read => &self.read_secret,
+            Access::Write => &self.write_secret,
+        };
         let Some(offered) = header.and_then(|value| value.strip_prefix("Bearer ")) else {
             return false;
         };
-        let (offered, expected) = (offered.as_bytes(), self.secret.as_bytes());
+        let (offered, expected) = (offered.as_bytes(), expected.as_bytes());
         // The length comparison leaks the length of the secret, which is not
         // the secret. Everything after it is length-independent.
         offered.len() == expected.len()
@@ -94,7 +151,10 @@ impl Relay {
                     age: None,
                 }
             }
-            ("GET" | "POST", "/usage") if !self.authorised(authorization) => {
+            ("GET", "/usage") if !self.authorised(authorization, Access::Read) => {
+                Reply { status: 401, body: error("unauthorised"), age: None }
+            }
+            ("POST", "/usage") if !self.authorised(authorization, Access::Write) => {
                 Reply { status: 401, body: error("unauthorised"), age: None }
             }
             ("POST", "/usage") => match body {
@@ -155,91 +215,126 @@ fn unix_time() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
-pub fn serve(relay: Relay, host: &str, port: u16, workers: usize) -> Result<(), String> {
-    let server =
-        Server::http((host, port)).map_err(|error| format!("could not listen: {error}"))?;
-    let server = Arc::new(server);
-    let relay = Arc::new(relay);
+/// Run the relay until a worker fails.
+///
+/// hyper on a two-thread tokio runtime, rather than a thread-per-connection
+/// server, for one reason: every limit below has to exist somewhere, and the
+/// obvious lighter choice offered no way to set any of them. A relay on a
+/// public host must be able to hang up on a client that connects and then says
+/// nothing.
+pub fn serve(
+    relay: Relay,
+    host: &str,
+    port: u16,
+    max_connections: usize,
+    header_timeout: Duration,
+) -> Result<(), String> {
+    let address: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .map_err(|_| format!("{host}:{port} is not an address I can bind"))?;
 
-    let mut threads = Vec::new();
-    for _ in 0..workers.max(1) {
-        let (server, relay) = (Arc::clone(&server), Arc::clone(&relay));
-        threads.push(std::thread::spawn(move || -> Result<(), String> {
-            loop {
-                match server.recv() {
-                    Ok(request) => answer(&relay, request),
-                    // The listening socket is gone. Ending the loop quietly
-                    // would look like an orderly shutdown, which it is not.
-                    Err(error) => return Err(format!("accept failed: {error}")),
-                }
-            }
-        }));
-    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|error| format!("could not start the runtime: {error}"))?;
 
-    // Whether the workers died matters more than it looks. Exiting 0 after a
-    // panic tells a supervisor configured to restart on failure that all is
-    // well, so the relay stays dead - and nothing on the phone says so either,
-    // because a relay that is not answering and a relay with nothing new to say
-    // look identical from there. It just serves an ever-older reading.
-    let mut fatal: Option<String> = None;
-    for thread in threads {
-        let outcome = match thread.join() {
-            Ok(Ok(())) => continue,
-            Ok(Err(error)) => error,
-            Err(_) => "a worker thread panicked".to_string(),
+    runtime.block_on(accept_loop(Arc::new(relay), address, max_connections.max(1), header_timeout))
+}
+
+async fn accept_loop(
+    relay: Arc<Relay>,
+    address: SocketAddr,
+    max_connections: usize,
+    header_timeout: Duration,
+) -> Result<(), String> {
+    let listener = TcpListener::bind(address)
+        .await
+        .map_err(|error| format!("could not listen on {address}: {error}"))?;
+    // Bounded, so a flood costs waiting rather than memory. Acquiring before
+    // accepting is what applies the back-pressure: past the ceiling, new
+    // connections stay in the kernel's queue instead of becoming tasks.
+    let capacity = Arc::new(Semaphore::new(max_connections));
+
+    loop {
+        let permit = Arc::clone(&capacity)
+            .acquire_owned()
+            .await
+            .map_err(|_| "connection limiter closed".to_string())?;
+        let (stream, _) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            // One failed accept is not a reason to take the relay down; a
+            // listener that is gone for good is.
+            Err(error) if is_transient(&error) => continue,
+            Err(error) => return Err(format!("accept failed: {error}")),
         };
-        fatal.get_or_insert(outcome);
-    }
-    match fatal {
-        Some(reason) => Err(format!("{reason}; the relay is no longer serving")),
-        None => Ok(()),
+        let relay = Arc::clone(&relay);
+        tokio::spawn(async move {
+            let _permit = permit;
+            let service = service_fn(move |request| answer(Arc::clone(&relay), request));
+            let connection = hyper::server::conn::http1::Builder::new()
+                // Required for header_read_timeout to work at all: without a
+                // timer hyper has no clock to measure against, and the timeout
+                // silently does nothing.
+                .timer(TokioTimer::new())
+                // Covers idle keep-alive too: a connection waiting to send its
+                // next request is one that has not sent headers yet.
+                .header_read_timeout(header_timeout)
+                .serve_connection(TokioIo::new(stream), service);
+            // A ceiling on any single connection, however well-behaved it looks.
+            let _ = tokio::time::timeout(CONNECTION_LIFETIME, connection).await;
+        });
     }
 }
 
-fn answer(relay: &Relay, mut request: Request) {
+fn is_transient(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(error.kind(), ConnectionAborted | ConnectionReset | Interrupted | WouldBlock)
+}
+
+async fn answer(
+    relay: Arc<Relay>,
+    request: Request<Incoming>,
+) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let method = request.method().as_str().to_string();
-    let target = request.url().to_string();
+    let target = request.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
     let authorization = request
         .headers()
-        .iter()
-        .find(|header| header.field.equiv("Authorization"))
-        .map(|header| header.value.as_str().to_string());
+        .get(hyper::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
 
-    // Refuse an oversized body by its declared length before reading a byte of
-    // it, and cap the read anyway in case the length was a lie.
-    let too_large = request.body_length().is_some_and(|length| length > MAX_BODY);
-    let body = if method == "POST" && !too_large {
-        let mut buffer = String::new();
-        request
-            .as_reader()
-            .take(MAX_BODY as u64)
-            .read_to_string(&mut buffer)
-            .ok()
-            .filter(|_| !buffer.trim().is_empty())
-            .map(|_| buffer)
+    let reply = if method == "POST" {
+        // Limited caps what can be read regardless of what Content-Length
+        // claimed; the timeout caps how long the sender may take to send it.
+        let limited = Limited::new(request.into_body(), MAX_BODY);
+        match tokio::time::timeout(BODY_TIMEOUT, limited.collect()).await {
+            Ok(Ok(collected)) => {
+                let bytes = collected.to_bytes();
+                let body =
+                    String::from_utf8(bytes.to_vec()).ok().filter(|text| !text.trim().is_empty());
+                relay.handle(&method, &target, authorization.as_deref(), body)
+            }
+            // Over the cap, malformed, or too slow. All three are the sender's
+            // problem, and none may displace a good reading.
+            Ok(Err(_)) => Reply { status: 413, body: error("reading too large"), age: None },
+            Err(_) => Reply { status: 408, body: error("took too long to send"), age: None },
+        }
     } else {
-        None
+        relay.handle(&method, &target, authorization.as_deref(), None)
     };
 
-    let reply = if too_large {
-        Reply { status: 413, body: error("reading too large"), age: None }
-    } else {
-        relay.handle(&method, &target, authorization.as_deref(), body)
-    };
-
-    let mut response = Response::from_string(reply.body)
-        .with_status_code(reply.status)
-        .with_header(header("Content-Type", "application/json"));
+    let mut response = Response::builder()
+        .status(StatusCode::from_u16(reply.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
+        .header(hyper::header::CONTENT_TYPE, "application/json");
     if let Some(age) = reply.age {
-        response = response.with_header(header("X-Headroom-Age", &age.to_string()));
+        response = response.header("X-Headroom-Age", age.to_string());
     }
     // Nothing is logged, here or anywhere: a request line can carry a bearer
     // token in a query string, and there is nothing this needs a journal for.
-    let _ = request.respond(response);
-}
-
-fn header(field: &str, value: &str) -> Header {
-    Header::from_bytes(field.as_bytes(), value.as_bytes()).expect("static header is well-formed")
+    Ok(response
+        .body(Full::new(Bytes::from(reply.body)))
+        .unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))))
 }
 
 /// Bytes from the kernel, formatted as a URL-safe token. No dependency, and no
@@ -257,6 +352,9 @@ pub fn new_secret() -> Result<String, String> {
 mod tests {
     use super::*;
 
+    const READ: &str = "read-key";
+    const WRITE: &str = "write-key";
+
     fn relay() -> Relay {
         let path = std::env::temp_dir().join(format!(
             "headroom-relay-{}-{:?}.json",
@@ -264,13 +362,13 @@ mod tests {
             std::thread::current().id()
         ));
         std::fs::remove_file(&path).ok();
-        let mut relay = Relay::new("s3cret".into(), path);
+        let mut relay = Relay::new(READ.into(), WRITE.into(), path);
         relay.now = || 1_000;
         relay
     }
 
     fn push(relay: &Relay, body: &str) -> Reply {
-        relay.handle("POST", "/usage", Some("Bearer s3cret"), Some(body.into()))
+        relay.handle("POST", "/usage", Some(&format!("Bearer {WRITE}")), Some(body.into()))
     }
 
     // --- authorisation ---
@@ -302,7 +400,58 @@ mod tests {
     fn a_prefix_of_the_secret_is_rejected() {
         // Guards the comparison: a length-independent check would let a caller
         // find the secret one character at a time.
-        assert_eq!(relay().handle("GET", "/usage", Some("Bearer s3cre"), None).status, 401);
+        assert_eq!(relay().handle("GET", "/usage", Some("Bearer read-ke"), None).status, 401);
+    }
+
+    // --- the two keys are not interchangeable ---
+    //
+    // This is the whole point of holding two. The phone carries the read key,
+    // so a photographed QR code or a lost phone leaks what fraction of the
+    // quota is gone - and cannot forge it.
+
+    #[test]
+    fn the_read_key_cannot_write() {
+        let relay = relay();
+        push(&relay, r#"{"limits":[{"percent":10}]}"#);
+        let attempt = relay.handle(
+            "POST",
+            "/usage",
+            Some(&format!("Bearer {READ}")),
+            Some(r#"{"limits":[{"percent":99}]}"#.into()),
+        );
+        assert_eq!(attempt.status, 401);
+        assert!(
+            relay
+                .handle("GET", "/usage", Some(&format!("Bearer {READ}")), None)
+                .body
+                .contains("10"),
+            "the read key overwrote a reading",
+        );
+    }
+
+    #[test]
+    fn the_write_key_cannot_read() {
+        // Less critical than the other direction, but least privilege runs
+        // both ways: the pusher has no business reading back.
+        let relay = relay();
+        push(&relay, r#"{"limits":[{"percent":10}]}"#);
+        let reply = relay.handle("GET", "/usage", Some(&format!("Bearer {WRITE}")), None);
+        assert_eq!(reply.status, 401);
+        assert!(!reply.body.contains("10"));
+    }
+
+    #[test]
+    fn one_key_for_both_roles_still_works() {
+        // The simple setup, and the one an existing install is already on.
+        let path =
+            std::env::temp_dir().join(format!("headroom-single-{}.json", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        let relay = Relay::new("same".into(), "same".into(), path);
+        assert_eq!(
+            relay.handle("POST", "/usage", Some("Bearer same"), Some("{}".into())).status,
+            204,
+        );
+        assert_eq!(relay.handle("GET", "/usage", Some("Bearer same"), None).status, 200);
     }
 
     // --- storing and serving ---
@@ -312,7 +461,7 @@ mod tests {
         let relay = relay();
         let body = r#"{"limits":[{"kind":"session","percent":41.6}]}"#;
         push(&relay, body);
-        let reply = relay.handle("GET", "/usage", Some("Bearer s3cret"), None);
+        let reply = relay.handle("GET", "/usage", Some(&format!("Bearer {READ}")), None);
         assert_eq!(reply.status, 200);
         assert_eq!(reply.body, body, "the relay must not reinterpret what it stores");
     }
@@ -322,13 +471,16 @@ mod tests {
         let mut relay = relay();
         push(&relay, "{}");
         relay.now = || 1_180;
-        assert_eq!(relay.handle("GET", "/usage", Some("Bearer s3cret"), None).age, Some(180));
+        assert_eq!(
+            relay.handle("GET", "/usage", Some(&format!("Bearer {READ}")), None).age,
+            Some(180)
+        );
     }
 
     #[test]
     fn nothing_pushed_yet_is_not_an_empty_reading() {
         // The app must be able to tell this from "you have used nothing".
-        let reply = relay().handle("GET", "/usage", Some("Bearer s3cret"), None);
+        let reply = relay().handle("GET", "/usage", Some(&format!("Bearer {READ}")), None);
         assert_eq!(reply.status, 503);
     }
 
@@ -337,7 +489,12 @@ mod tests {
         let relay = relay();
         push(&relay, r#"{"limits":[{"percent":10}]}"#);
         push(&relay, r#"{"limits":[{"percent":20}]}"#);
-        assert!(relay.handle("GET", "/usage", Some("Bearer s3cret"), None).body.contains("20"));
+        assert!(
+            relay
+                .handle("GET", "/usage", Some(&format!("Bearer {READ}")), None)
+                .body
+                .contains("20")
+        );
     }
 
     #[test]
@@ -345,16 +502,22 @@ mod tests {
         // Storing it would blank a good reading on the phone.
         let relay = relay();
         push(&relay, "{}");
-        assert_eq!(relay.handle("POST", "/usage", Some("Bearer s3cret"), None).status, 400);
-        assert_eq!(relay.handle("GET", "/usage", Some("Bearer s3cret"), None).status, 200);
+        assert_eq!(
+            relay.handle("POST", "/usage", Some(&format!("Bearer {WRITE}")), None).status,
+            400
+        );
+        assert_eq!(
+            relay.handle("GET", "/usage", Some(&format!("Bearer {READ}")), None).status,
+            200
+        );
     }
 
     #[test]
     fn a_reading_survives_a_restart() {
         let relay = relay();
         push(&relay, r#"{"limits":[{"percent":33}]}"#);
-        let restarted = Relay::new("s3cret".into(), relay.state_path.clone());
-        let reply = restarted.handle("GET", "/usage", Some("Bearer s3cret"), None);
+        let restarted = Relay::new(READ.into(), WRITE.into(), relay.state_path.clone());
+        let reply = restarted.handle("GET", "/usage", Some(&format!("Bearer {READ}")), None);
         assert_eq!(reply.status, 200);
         assert!(reply.body.contains("33"));
     }
@@ -381,7 +544,7 @@ mod tests {
         let relay = relay();
         push(&relay, "{}");
         assert_eq!(
-            relay.handle("GET", "/usage?at_wall=1", Some("Bearer s3cret"), None).status,
+            relay.handle("GET", "/usage?at_wall=1", Some(&format!("Bearer {READ}")), None).status,
             200
         );
     }
@@ -389,8 +552,11 @@ mod tests {
     #[test]
     fn unknown_paths_and_methods_are_refused() {
         let relay = relay();
-        assert_eq!(relay.handle("GET", "/", Some("Bearer s3cret"), None).status, 404);
-        assert_eq!(relay.handle("DELETE", "/usage", Some("Bearer s3cret"), None).status, 405);
+        assert_eq!(relay.handle("GET", "/", Some(&format!("Bearer {READ}")), None).status, 404);
+        assert_eq!(
+            relay.handle("DELETE", "/usage", Some(&format!("Bearer {READ}")), None).status,
+            405
+        );
     }
 
     #[test]

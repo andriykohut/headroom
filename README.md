@@ -106,22 +106,37 @@ that machine is always on.
 
 ### 1. The relay
 
-On your server. It speaks plain HTTP and binds to loopback by default, so put a
-TLS terminator in front of it — the phone will be sending the shared secret over
-the open internet.
+On your server. Generate **two** keys:
 
 ```bash
-headroom serve --new-secret > ~/.config/headroom/secret
-chmod 600 ~/.config/headroom/secret
+mkdir -p ~/.config/headroom
+headroom serve --new-secret > ~/.config/headroom/push-key
+headroom serve --new-secret > ~/.config/headroom/read-key
+chmod 600 ~/.config/headroom/*-key
 
-headroom serve --secret-file ~/.config/headroom/secret --port 8765
+headroom serve \
+  --push-secret-file ~/.config/headroom/push-key \
+  --read-secret-file ~/.config/headroom/read-key
 ```
+
+Two, because the two clients need opposite things. Your machine writes and
+never reads; your phone reads and never writes. Give each only what it needs
+and a photographed QR code leaks what fraction of your quota is gone without
+letting anyone forge it — and either key can be rotated without touching the
+other. Presenting the read key to a `POST` fails exactly as a stranger's key
+would; neither is a master key.
+
+A single `--secret-file` uses one key for both. That works, and the relay says
+so on startup, but it means your phone is carrying something that can also
+overwrite readings.
 
 A systemd unit, if you want one:
 
 ```ini
 [Service]
-ExecStart=/usr/local/bin/headroom serve --secret-file /etc/headroom/secret
+ExecStart=/usr/local/bin/headroom serve \
+  --push-secret-file /etc/headroom/push-key \
+  --read-secret-file /etc/headroom/read-key
 DynamicUser=yes
 StateDirectory=headroom
 # always, not on-failure: a relay that stops answering looks identical from the
@@ -137,25 +152,22 @@ NoNewPrivileges=yes
 WantedBy=multi-user.target
 ```
 
-**Put a reverse proxy in front of it, and not only for TLS.** The relay handles
-each connection on its own thread with no socket timeout, so an idle connection
-costs a thread until the client goes away — 400 of them measured at 406 threads
-and 11 MB. That is a job for the thing already terminating your TLS, which does
-it better than a second implementation would:
+**Put TLS in front of it.** It speaks plain HTTP and binds to loopback by
+default, and the phone sends its key on every request. The app refuses
+cleartext outright, so this is enforced rather than advised:
 
 ```
 your-relay.example.com {
 	reverse_proxy 127.0.0.1:8765
-	# Caddy closes idle and slow clients; the relay itself will not.
-	servers {
-		timeouts {
-			read_body 10s
-			read_header 5s
-			idle 30s
-		}
-	}
 }
 ```
+
+The relay defends itself against slow and idle clients rather than relying on
+that proxy to do it: connections that do not send request headers within
+`--header-timeout` (10s) are closed, bodies must arrive within 15s, no
+connection lives past 120s, and `--max-connections` (64) are served at once
+while the rest wait in the kernel's queue. Flooded with idle connections it
+holds at three threads and about 4 MB.
 
 Check it: `curl https://your-relay/healthz` → `{"ok":false,"age_seconds":null}`
 until the first reading arrives. That endpoint is deliberately unauthenticated
@@ -179,7 +191,7 @@ Set the address and secret where the status line can see them — in
 
 ```bash
 export HEADROOM_RELAY_URL=https://your-relay
-export HEADROOM_RELAY_SECRET=...    # or --secret-file
+export HEADROOM_RELAY_SECRET=...    # the push key; or --secret-file
 ```
 
 Check it with `headroom push --once`, which does the work in the foreground and
@@ -199,15 +211,17 @@ to a stopwatch rather than to a comment.
 /headroom-link
 ```
 
-or `headroom link --relay https://your-relay`. That prints a QR code carrying
-the relay's address and secret. Scan it in the app.
+or `headroom link --relay https://your-relay --read-secret-file <path>`. That
+prints a QR code carrying the relay's address and its **read** key. Scan it in
+the app.
 
 > The QR needs a terminal **at least 85 columns wide**. Narrower and it wraps,
 > which looks like a QR and will not scan — the command warns you rather than
 > letting you find out by holding up a phone.
 
-Treat the payload like a password. It is not account access, but it does let
-someone read your usage and write false readings to your relay.
+Treat the payload like a password — but a narrow one. It is not account access,
+and with two keys it is not write access either: someone who photographs it
+learns how much of your quota you have used, and nothing else.
 
 ## This is not an official Anthropic client
 

@@ -5,7 +5,7 @@ explicit about which holds what:
 
 | Part | Holds | Worst case if it fails |
 | --- | --- | --- |
-| The **app**, on your phone | Your relay's address and shared secret | Someone reads your quota usage and writes false readings |
+| The **app**, on your phone | Your relay's address and its **read** key | Someone reads your quota usage |
 | The **relay**, on a machine you run | The last usage reading | The same, plus whatever the host itself is worth |
 | The **CLI**, on the machine you code on | Nothing durable; it *reads* Claude Code's access token to make one request | Your Claude credential leaks |
 
@@ -83,14 +83,34 @@ put a reverse proxy in front, for two reasons rather than one.
 open internet. The app refuses cleartext outright, so this is enforced rather
 than advised.
 
-**Connection limits and timeouts.** The relay gives each connection its own
-thread and sets no socket timeout, so a connection that opens and then does
-nothing costs a thread until the client goes away. Measured: 400 idle
-connections held 406 threads and 11 MB. It kept serving throughout — the read
-happens off the worker threads, so this is resource growth rather than
-starvation — but it is unbounded, and the proxy already terminating your TLS
-limits it properly. Reports that an unproxied relay can be flooded are
-therefore not vulnerabilities; see below.
+**Slow and idle clients** are handled by the relay itself rather than delegated
+to that proxy: a connection that does not send request headers within
+`--header-timeout` (10s, which also bounds idle keep-alive) is closed, a body
+must arrive within 15s, no connection outlives 120s, and `--max-connections`
+(64) are served at once while the rest wait in the kernel's accept queue.
+Flooded with idle connections it holds at three threads and about 4 MB. This is
+why it runs on hyper: the lighter thread-per-connection server it used first
+exposed no way to set any socket timeout, and the same flood took it to 406
+threads.
+
+## Two keys, not one
+
+The machine that pushes and the phone that reads hold different secrets,
+checked against different roles. This is the difference it makes:
+
+| If this leaks | They can | They cannot |
+| --- | --- | --- |
+| The **read** key (on your phone, in the QR code) | See your usage percentages | Write anything |
+| The **push** key (on the machine you code on) | Overwrite readings | Read them back |
+
+So a photographed QR code or a stolen phone costs you the confidentiality of
+three percentages, and nothing else — it cannot be used to feed you false
+numbers and suppress a limit warning. Either key rotates without touching the
+other.
+
+Passing a single `--secret-file` collapses both roles onto one key. It works,
+and the relay warns on startup, but it gives the phone write access it has no
+use for.
 
 **What an unauthenticated attacker can actually reach:** `/healthz`, which
 reports whether a reading exists and how old it is, and nothing else. `/usage`
