@@ -16,9 +16,25 @@ jobs:
   version:
     name: Tag and manifest must agree
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/check-version.sh "${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+      - id: resolve
+        # GITHUB_REF_NAME/github.ref_name is the BRANCH the run was
+        # dispatched from under workflow_dispatch, not empty, so a shell
+        # ${VAR:-default} fallback never fires there. Decide on the event
+        # instead, and publish the result once so every other job (and any
+        # future one) consumes this single resolved value instead of
+        # re-deriving it.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ github.event.inputs.tag }}"
+          else
+            version="${{ github.ref_name }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: scripts/check-version.sh "${{ steps.resolve.outputs.version }}"
 
   binaries:
     name: Build ${{ matrix.target }}
@@ -58,9 +74,11 @@ jobs:
       - name: It must run, and say the version being released
         # Every target is built on a runner of its own architecture, so every
         # one of them can be executed here rather than by whoever downloads it.
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           ./headroom-${{ matrix.target }} --version
-          ./headroom-${{ matrix.target }} --version | grep -q "${GITHUB_REF_NAME#v}"
+          ./headroom-${{ matrix.target }} --version | grep -q "${VERSION#v}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -141,12 +159,13 @@ jobs:
       # the name has to be stable across releases and carry the version.
       - name: Name the artifact
         id: artifact
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          name="headroom-${version}.apk"
+          name="headroom-${VERSION}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify what is about to be published
         run: |
