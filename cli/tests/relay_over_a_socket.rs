@@ -6,7 +6,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 
 struct Relay {
@@ -32,12 +31,20 @@ fn start(name: &str) -> Relay {
     let secret_file = directory.join("secret");
     std::fs::write(&secret_file, &secret).unwrap();
 
-    // Tests run in parallel, so each relay needs its own port. The process id
-    // separates concurrent `cargo test` runs; the counter separates the tests
-    // within one.
-    static NEXT: AtomicU16 = AtomicU16::new(0);
-    let port =
-        18_000 + (std::process::id() % 1_000) as u16 * 16 + NEXT.fetch_add(1, Ordering::Relaxed);
+    // Let the OS pick a free port rather than deriving one from the process id.
+    // Seven of these run in parallel, and a derived port can collide both
+    // between tests in one run and between concurrent runs on a shared machine
+    // - which is how this first failed on CI, as an unexplained startup
+    // timeout. Binding and immediately dropping leaves a small race; the
+    // generous readiness deadline below is what covers it.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("find a free port")
+        .local_addr()
+        .unwrap()
+        .port();
+    // Kept, so a startup failure reads as a startup failure rather than a
+    // timeout with no explanation.
+    let log = directory.join("relay.log");
     let process = Command::new(env!("CARGO_BIN_EXE_headroom"))
         .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
         .args(["--secret-file", secret_file.to_str().unwrap()])
@@ -46,19 +53,23 @@ fn start(name: &str) -> Relay {
         // else here completes far inside it.
         .args(["--header-timeout", "1"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(std::fs::File::create(&log).expect("open the relay log")))
         .spawn()
         .expect("start the relay");
 
     let relay = Relay { process, port, secret };
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Generous on purpose: a CI runner starting seven of these at once is far
+    // slower than a laptop starting one, and a flaky harness costs more than a
+    // slow one.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
             return relay;
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    panic!("the relay never started listening on {port}");
+    let stderr = std::fs::read_to_string(&log).unwrap_or_default();
+    panic!("the relay never listened on {port}. Its stderr said: {stderr}");
 }
 
 struct Reply {
