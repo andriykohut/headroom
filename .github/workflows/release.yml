@@ -19,7 +19,10 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      # No checkout here: this step only reads workflow-context expressions
+      # (github.event_name, github.event.inputs.tag, github.ref_name), so it
+      # needs no working tree, and it must run before the checkout below can
+      # know which ref to pin to.
       - id: resolve
         # GITHUB_REF_NAME/github.ref_name is the BRANCH the run was
         # dispatched from under workflow_dispatch, not empty, so a shell
@@ -34,6 +37,16 @@ jobs:
             version="${{ github.ref_name }}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Pinned to the tag itself, not github.sha: under workflow_dispatch
+      # github.sha is whatever ref "Use workflow from" was run against
+      # (typically main), completely decoupled from the tag typed into the
+      # input. Checking out the tag here means check-version.sh below
+      # compares the manifest AT THE TAGGED COMMIT, which is the gate this
+      # job exists to run - and it fails loudly if that tag does not exist,
+      # which is correct: this input is documented as "Tag to build".
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.resolve.outputs.version }}
       - run: scripts/check-version.sh "${{ steps.resolve.outputs.version }}"
 
   binaries:
@@ -56,7 +69,13 @@ jobs:
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
     steps:
+      # Pinned to the tag: github.sha under workflow_dispatch is the ref
+      # "Use workflow from" was run against (typically main), not the tag
+      # typed into the input. Without this, a binary built from main could
+      # get uploaded as if it were the tagged release.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
 
       - name: Install the target
         run: rustup target add ${{ matrix.target }}
@@ -115,7 +134,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -212,7 +235,11 @@ jobs:
     needs: [version, checksums]
     runs-on: ubuntu-latest
     steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
 
       # A release must clear the same bar as any other build, and then some:
       # this artifact is the one strangers install.
@@ -305,18 +332,32 @@ jobs:
 
       - name: Remove the signing key from the runner
         if: always()
+        # Best-effort cleanup of two files on an ephemeral runner. `release`
+        # gates `crate` and `installer` on its job status now, so a spurious
+        # failure here must never fail the job (and so block a publish and
+        # an install check) after Publish has already made the release
+        # public.
+        continue-on-error: true
         run: rm -f headroom-release.keystore keystore.properties
 
   crate:
     name: Publish to crates.io
-    needs: [version, release]
+    # installer is included so the comment below is actually true: an
+    # irreversible publish should wait on the release having been proven
+    # installable, not just built.
+    needs: [version, release, installer]
     runs-on: ubuntu-latest
     steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
       - run: scripts/check-version.sh "${{ needs.version.outputs.version }}"
-      # Last, and only after the release exists: a crates.io version can
-      # never be unpublished, so nothing should reach it that has not already
-      # survived every other gate.
+      # Last, and only after every other gate (the release, its binaries,
+      # its checksums, and the installer) has passed: a crates.io version
+      # can never be unpublished, so nothing should reach it that has not
+      # already survived every other gate.
       - run: cargo publish --locked --manifest-path cli/Cargo.toml
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
@@ -329,7 +370,11 @@ jobs:
         runner: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.runner }}
     steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
       - name: Run the installer against the release just published
         env:
           HEADROOM_VERSION: ${{ needs.version.outputs.version }}
