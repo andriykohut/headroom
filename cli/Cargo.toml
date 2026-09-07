@@ -2,7 +2,10 @@
 name = "headroom"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# 1.89 is where `File::try_lock` landed in std. `push` takes an advisory
+# lock so that several Claude Code sessions on one machine cost one request
+# between them, and doing it without std would mean a libc dependency.
+rust-version = "1.89"
 description = "Push Claude Code usage from your machine to a Headroom relay, and serve it to the phone"
 license = "Apache-2.0"
 repository = "https://github.com/andriykohut/headroom"

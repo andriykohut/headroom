@@ -23,6 +23,7 @@ use crate::claude;
 use crate::statusline::{self, StatusLine};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -56,9 +57,6 @@ const FROM_STATUS_LINE: [&str; 2] = ["session", "weekly_all"];
 /// endpoint - and there it decides between a bar that is quietly wrong and a
 /// bar that is honestly absent. It matches the app's own staleness threshold.
 const CARRY_FOR: u64 = 3_600;
-
-/// A child that outlives this is a hung request, not work in progress.
-const LOCK_STALE_AFTER: u64 = 120;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
@@ -273,45 +271,34 @@ fn agent() -> ureq::Agent {
         .new_agent()
 }
 
-/// A lock that clears itself, including after a kill -9.
-struct Lock(PathBuf);
+/// An advisory lock on a file, released by the kernel when its holder exits -
+/// including a `kill -9`, and including a machine that lost power.
+///
+/// The file's *existence* means nothing and it is never removed; it is only
+/// something to hang the lock on. Locking by existence instead needs a
+/// staleness rule to recover from a killed child, and two children reaching
+/// that rule in the same instant both recover - each deleting the lock the
+/// other just took. That race is reached by running several Claude Code
+/// sessions at once, which is the ordinary case this exists to handle.
+struct Lock {
+    /// Held open for exactly as long as the lock is: closing it unlocks.
+    _file: File,
+}
 
 impl Lock {
+    /// `None` when another process holds it, and that child then pushes
+    /// nothing. Nothing is lost by that: the readings are account-wide, so the
+    /// holder is reporting the same numbers on its behalf.
     fn acquire(path: &Path) -> Option<Self> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(_) => Some(Lock(path.to_path_buf())),
-            Err(_) => {
-                // A crashed child leaves its lock behind. Left alone that would
-                // silence pushes permanently, which is a worse failure than the
-                // duplicate request this prevents.
-                let stale = std::fs::metadata(path)
-                    .and_then(|meta| meta.modified())
-                    .map(|when| {
-                        SystemTime::now().duration_since(when).unwrap_or_default().as_secs()
-                            > LOCK_STALE_AFTER
-                    })
-                    .unwrap_or(true);
-                if !stale {
-                    return None;
-                }
-                let _ = std::fs::remove_file(path);
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)
-                    .ok()
-                    .map(|_| Lock(path.to_path_buf()))
-            }
-        }
-    }
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        // Never truncated: the file is a handle to lock, not somewhere to
+        // write, and another session may be holding it right now.
+        let file =
+            std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(path).ok()?;
+        file.try_lock().ok()?;
+        Some(Lock { _file: file })
     }
 }
 
@@ -342,10 +329,16 @@ fn save_state(path: &Path, state: &State) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(encoded) = serde_json::to_string(state) {
-        let temporary = path.with_extension("tmp");
-        if std::fs::write(&temporary, encoded).is_ok() {
-            let _ = std::fs::rename(&temporary, path);
+        // One scratch name per writer. `--once` does its work outside the lock,
+        // so two writers can be here at the same moment, and a shared name let
+        // them truncate each other's half-written state - or rename the other's
+        // bytes into place - rather than each landing whole.
+        let scratch = path.with_extension(format!("{}.tmp", std::process::id()));
+        if std::fs::write(&scratch, encoded).is_ok() && std::fs::rename(&scratch, path).is_ok() {
+            return;
         }
+        // Best effort: a failed write or rename must not leave scratch behind.
+        let _ = std::fs::remove_file(&scratch);
     }
 }
 
@@ -525,13 +518,28 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_lock_does_not_silence_pushes_forever() {
-        // Left by a child that was killed. Honouring it indefinitely would be a
-        // worse failure than the duplicate request it exists to prevent.
-        let path = temp().join("c.lock");
+    fn a_lock_file_left_by_a_crash_is_available_at_once() {
+        // A child killed mid-request cannot clean up after itself. The kernel
+        // drops an advisory lock when its holder dies, so the next child takes
+        // the file over immediately: there is no window in which a holder that
+        // no longer exists silences pushes.
+        let path = temp().join("crashed.lock");
         std::fs::write(&path, b"").unwrap();
-        let old = SystemTime::now() - Duration::from_secs(LOCK_STALE_AFTER + 60);
-        std::fs::File::open(&path).unwrap().set_modified(old).unwrap();
-        assert!(Lock::acquire(&path).is_some());
+        assert!(Lock::acquire(&path).is_some(), "a leftover file is not a live holder");
+    }
+
+    #[test]
+    fn a_save_does_not_clobber_another_writer_s_scratch_file() {
+        // `--once` does its work outside the lock, so two writers can be in
+        // save_state at the same moment. One shared scratch filename let them
+        // truncate each other's half-written state and rename the result.
+        let path = temp().join("concurrent.json");
+        let theirs = path.with_extension("tmp");
+        std::fs::write(&theirs, b"another writer was mid-write").unwrap();
+
+        save_state(&path, &State { enriched_at: 7, ..Default::default() });
+
+        assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "another writer was mid-write");
+        assert_eq!(load_state(&path).enriched_at, 7);
     }
 }
