@@ -76,12 +76,33 @@ five-minute default and the sixty-second floor exist for that reason.
 
 ## Running the relay safely
 
-It speaks plain HTTP and binds to `127.0.0.1` by default. That default is the
-safe one and you should keep it, terminating TLS in front — the phone sends the
-shared secret on every request, usually across the open internet.
+It speaks plain HTTP and binds to `127.0.0.1` by default. Keep that default and
+put a reverse proxy in front, for two reasons rather than one.
 
-The app refuses cleartext outright (`network_security_config.xml`), so this is
-enforced rather than advised.
+**TLS.** The phone sends the shared secret on every request, usually across the
+open internet. The app refuses cleartext outright, so this is enforced rather
+than advised.
+
+**Connection limits and timeouts.** The relay gives each connection its own
+thread and sets no socket timeout, so a connection that opens and then does
+nothing costs a thread until the client goes away. Measured: 400 idle
+connections held 406 threads and 11 MB. It kept serving throughout — the read
+happens off the worker threads, so this is resource growth rather than
+starvation — but it is unbounded, and the proxy already terminating your TLS
+limits it properly. Reports that an unproxied relay can be flooded are
+therefore not vulnerabilities; see below.
+
+**What an unauthenticated attacker can actually reach:** `/healthz`, which
+reports whether a reading exists and how old it is, and nothing else. `/usage`
+requires the secret in both directions — a `GET` cannot read a reading without
+it and a `POST` cannot overwrite one. The secret is 32 characters from a
+64-symbol alphabet, compared in constant time, so guessing it is not a strategy.
+
+**What the relay cannot do, by construction:** contact Anthropic. It holds no
+credential and imports no HTTP client — `cli/src/relay.rs` has no outbound call
+in it at all. Traffic aimed at your relay costs you CPU and bandwidth on that
+host. It cannot cost you Claude usage, because nothing on that host can spend
+any.
 
 ## One thing to know about debug builds
 

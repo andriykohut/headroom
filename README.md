@@ -124,18 +124,42 @@ A systemd unit, if you want one:
 ExecStart=/usr/local/bin/headroom serve --secret-file /etc/headroom/secret
 DynamicUser=yes
 StateDirectory=headroom
-Restart=on-failure
+# always, not on-failure: a relay that stops answering looks identical from the
+# phone to one with nothing new to say, so nothing will tell you it is down.
+Restart=always
+RestartSec=5
 # It stores percentages and talks to nothing. Give it nothing.
-PrivateNetwork=no
 ProtectSystem=strict
+PrivateDevices=yes
 NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+**Put a reverse proxy in front of it, and not only for TLS.** The relay handles
+each connection on its own thread with no socket timeout, so an idle connection
+costs a thread until the client goes away — 400 of them measured at 406 threads
+and 11 MB. That is a job for the thing already terminating your TLS, which does
+it better than a second implementation would:
+
+```
+your-relay.example.com {
+	reverse_proxy 127.0.0.1:8765
+	# Caddy closes idle and slow clients; the relay itself will not.
+	servers {
+		timeouts {
+			read_body 10s
+			read_header 5s
+			idle 30s
+		}
+	}
+}
+```
+
 Check it: `curl https://your-relay/healthz` → `{"ok":false,"age_seconds":null}`
-until the first reading arrives.
+until the first reading arrives. That endpoint is deliberately unauthenticated
+and deliberately says nothing but whether a reading exists and how old it is.
 
 ### 2. The status line
 

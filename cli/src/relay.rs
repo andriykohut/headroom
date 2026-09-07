@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Request, Response, Server};
 
@@ -85,7 +85,7 @@ impl Relay {
             // secret. It reports that a reading exists and how old it is, and
             // nothing about what is in it.
             ("GET", "/healthz") => {
-                let snapshot = self.snapshot.lock().unwrap();
+                let snapshot = lock(&self.snapshot);
                 let age = snapshot.as_ref().map(|s| (self.now)().saturating_sub(s.received_at));
                 Reply {
                     status: 200,
@@ -104,7 +104,7 @@ impl Relay {
                 }
                 None => Reply { status: 400, body: error("empty body"), age: None },
             },
-            ("GET", "/usage") => match self.snapshot.lock().unwrap().as_ref() {
+            ("GET", "/usage") => match lock(&self.snapshot).as_ref() {
                 Some(snapshot) => Reply {
                     status: 200,
                     body: snapshot.body.clone(),
@@ -132,8 +132,19 @@ impl Relay {
                 let _ = std::fs::rename(&temporary, &self.state_path);
             }
         }
-        *self.snapshot.lock().unwrap() = Some(snapshot);
+        *lock(&self.snapshot) = Some(snapshot);
     }
+}
+
+/// Lock without `unwrap`.
+///
+/// A panic anywhere in a worker would otherwise poison this mutex and take
+/// every *other* worker down with it on their next request - turning one bug
+/// into a total outage. What it guards is a `String` and a timestamp, replaced
+/// wholesale; a panic cannot leave that half-written, so recovering the value
+/// is both safe and strictly better than propagating.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn error(message: &str) -> String {
@@ -153,16 +164,36 @@ pub fn serve(relay: Relay, host: &str, port: u16, workers: usize) -> Result<(), 
     let mut threads = Vec::new();
     for _ in 0..workers.max(1) {
         let (server, relay) = (Arc::clone(&server), Arc::clone(&relay));
-        threads.push(std::thread::spawn(move || {
-            while let Ok(request) = server.recv() {
-                answer(&relay, request);
+        threads.push(std::thread::spawn(move || -> Result<(), String> {
+            loop {
+                match server.recv() {
+                    Ok(request) => answer(&relay, request),
+                    // The listening socket is gone. Ending the loop quietly
+                    // would look like an orderly shutdown, which it is not.
+                    Err(error) => return Err(format!("accept failed: {error}")),
+                }
             }
         }));
     }
+
+    // Whether the workers died matters more than it looks. Exiting 0 after a
+    // panic tells a supervisor configured to restart on failure that all is
+    // well, so the relay stays dead - and nothing on the phone says so either,
+    // because a relay that is not answering and a relay with nothing new to say
+    // look identical from there. It just serves an ever-older reading.
+    let mut fatal: Option<String> = None;
     for thread in threads {
-        let _ = thread.join();
+        let outcome = match thread.join() {
+            Ok(Ok(())) => continue,
+            Ok(Err(error)) => error,
+            Err(_) => "a worker thread panicked".to_string(),
+        };
+        fatal.get_or_insert(outcome);
     }
-    Ok(())
+    match fatal {
+        Some(reason) => Err(format!("{reason}; the relay is no longer serving")),
+        None => Ok(()),
+    }
 }
 
 fn answer(relay: &Relay, mut request: Request) {
@@ -360,6 +391,21 @@ mod tests {
         let relay = relay();
         assert_eq!(relay.handle("GET", "/", Some("Bearer s3cret"), None).status, 404);
         assert_eq!(relay.handle("DELETE", "/usage", Some("Bearer s3cret"), None).status, 405);
+    }
+
+    #[test]
+    fn a_poisoned_lock_does_not_take_the_other_workers_down() {
+        // One panicking request must cost that request, not the process. With
+        // `.lock().unwrap()` every later reader panics too, all four workers
+        // die in turn, and the relay goes silently deaf.
+        let mutex = Mutex::new(41);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut guard = lock(&mutex);
+            *guard = 42;
+            panic!("while holding the lock");
+        }));
+        assert!(mutex.is_poisoned(), "the test did not reproduce a poisoned lock");
+        assert_eq!(*lock(&mutex), 42, "a later reader must still get the value");
     }
 
     #[test]
