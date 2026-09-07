@@ -25,7 +25,6 @@ There are three pieces, and it is worth being clear about which is which:
 | The last usage reading | App-private storage | So the screen shows something while offline, and so the next reading can be compared with the last |
 | Which notifications have already fired | App-private storage | So none fires twice |
 | Your notification settings and warning threshold | App-private storage | They are your settings |
-| A "do not call before" timestamp | App-private storage | Honoured if a server ever asks for fewer requests |
 
 All of it is deleted when you unlink the phone (Settings → Unlink this phone)
 or uninstall the app.

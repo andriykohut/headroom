@@ -1,8 +1,7 @@
 package dev.andrii.headroom.notify
 
-import dev.andrii.headroom.credential.RefreshFailedException
 import dev.andrii.headroom.data.NotLinkedException
-import dev.andrii.headroom.data.RateLimitedException
+import dev.andrii.headroom.data.RelayRejectedException
 import dev.andrii.headroom.data.SnapshotCache
 import dev.andrii.headroom.data.UsageFetchException
 import dev.andrii.headroom.domain.NotificationEvent
@@ -14,7 +13,7 @@ import dev.andrii.headroom.schedule.nextAlarmAt
 
 data class CycleResult(
     val notified: List<NotificationEvent>,
-    val relinkNeeded: Boolean,
+    val needsNewCode: Boolean,
     val nextAlarmAt: Long?,
 )
 
@@ -26,7 +25,7 @@ data class CycleResult(
  * emulator.
  */
 class NotificationCoordinator(
-    private val fetch: suspend (Boolean) -> UsageSnapshot,
+    private val fetch: suspend () -> UsageSnapshot,
     private val evaluator: TriggerEvaluator,
     private val log: NotificationLog,
     private val notifier: Notifier,
@@ -36,27 +35,22 @@ class NotificationCoordinator(
     private val now: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
 
-    suspend fun runCycle(atWall: Boolean = false): CycleResult {
+    suspend fun runCycle(): CycleResult {
         val previous = cache.load()
         val current = try {
-            fetch(atWall)
+            fetch()
         } catch (_: NotLinkedException) {
             // Nothing to say: the UI already shows the link prompt.
-            return CycleResult(emptyList(), relinkNeeded = false, nextAlarmAt = null)
-        } catch (e: RefreshFailedException) {
+            return CycleResult(emptyList(), needsNewCode = false, nextAlarmAt = null)
+        } catch (e: RelayRejectedException) {
             // Spec §7: never silent.
-            notifier.notifyRelinkNeeded(
+            notifier.notifyRelayRejected(
                 e.message ?: "Your relay would not accept this phone's key. Scan a new code.",
             )
-            return CycleResult(emptyList(), relinkNeeded = true, nextAlarmAt = null)
-        } catch (_: RateLimitedException) {
-            // No request was made, or the server refused one. Either way the
-            // next scheduled poll must not walk back into it - the gate is
-            // persisted, so it will refuse there too.
-            return CycleResult(emptyList(), relinkNeeded = false, nextAlarmAt = null)
+            return CycleResult(emptyList(), needsNewCode = true, nextAlarmAt = null)
         } catch (_: UsageFetchException) {
             // Transient. The cached snapshot and its age stay on screen.
-            return CycleResult(emptyList(), relinkNeeded = false, nextAlarmAt = null)
+            return CycleResult(emptyList(), needsNewCode = false, nextAlarmAt = null)
         }
 
         val currentSettings = settings()
@@ -77,6 +71,6 @@ class NotificationCoordinator(
         // Keys for windows now past can never fire again.
         log.prune(beforeResetsAt = now())
 
-        return CycleResult(events, relinkNeeded = false, nextAlarmAt = next)
+        return CycleResult(events, needsNewCode = false, nextAlarmAt = next)
     }
 }

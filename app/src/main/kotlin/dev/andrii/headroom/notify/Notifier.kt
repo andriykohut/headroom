@@ -4,12 +4,13 @@ import dev.andrii.headroom.domain.EventKey
 import dev.andrii.headroom.domain.NotificationEvent
 import dev.andrii.headroom.domain.TriggerType
 
-const val RELINK_CHANNEL_ID = "relink_needed"
+/** The id string is frozen: changing it orphans the user's channel settings. */
+const val RELAY_REJECTED_CHANNEL_ID = "relink_needed"
 
 interface Notifier {
     fun notify(event: NotificationEvent)
-    /** Spec §7: a failed refresh must be visible, not silent. */
-    fun notifyRelinkNeeded(message: String)
+    /** Spec §7: a relay that stops accepting this phone must not be silent. */
+    fun notifyRelayRejected(message: String)
 }
 
 /**

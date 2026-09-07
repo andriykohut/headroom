@@ -234,8 +234,8 @@ binary with no async runtime, because the status line hook has to start, do one
 thing and exit on every message you send.
 
 ```bash
-./gradlew :domain:test :app:testDebugUnitTest   # 182 tests
-cargo test --manifest-path cli/Cargo.toml       # 60 tests
+./gradlew :domain:test :app:testDebugUnitTest   # 163 tests
+cargo test --manifest-path cli/Cargo.toml       # 65 tests
 ./scripts/check-distribution.sh                 # the constraints publishing depends on
 ```
 

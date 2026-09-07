@@ -10,9 +10,9 @@ import kotlin.test.assertTrue
 /** Shared test double for the coordinator tests in Task 13. */
 class RecordingNotifier : Notifier {
     val events = mutableListOf<NotificationEvent>()
-    val relinkMessages = mutableListOf<String>()
+    val rejectionMessages = mutableListOf<String>()
     override fun notify(event: NotificationEvent) { events += event }
-    override fun notifyRelinkNeeded(message: String) { relinkMessages += message }
+    override fun notifyRelayRejected(message: String) { rejectionMessages += message }
 }
 
 class NotifierChannelTest {
@@ -44,7 +44,7 @@ class NotifierChannelTest {
 
     @Test
     fun `relink channel is distinct from every trigger channel`() {
-        assertTrue(RELINK_CHANNEL_ID !in TriggerType.entries.map(::channelIdFor))
+        assertTrue(RELAY_REJECTED_CHANNEL_ID !in TriggerType.entries.map(::channelIdFor))
     }
 
     @Test

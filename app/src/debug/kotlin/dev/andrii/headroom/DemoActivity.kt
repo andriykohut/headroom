@@ -53,12 +53,12 @@ class DemoActivity : ComponentActivity() {
         "offline" -> UsageState.Failed(
             snapshot = snapshot(fetchedAt = NOW - 25 * 60),
             message = "The request timed out. Showing the reading from 25 min ago.",
-            needsRelink = false,
+            needsNewCode = false,
         )
         "relink" -> UsageState.Failed(
             snapshot = snapshot(fetchedAt = NOW - 25 * 60),
             message = "The server rejected the refresh (HTTP 400).",
-            needsRelink = true,
+            needsNewCode = true,
         )
         "notlinked" -> UsageState.NotLinked
         else -> UsageState.Ready(snapshot(), stale = false)

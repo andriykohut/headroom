@@ -92,8 +92,8 @@ fun UsageScreen(
             is UsageState.Failed -> {
                 // Spec §7: say what went wrong, and keep the last reading on
                 // screen rather than blanking it.
-                if (state.needsRelink) {
-                    RelinkPanel(state.message, onLink)
+                if (state.needsNewCode) {
+                    RelayRejectedPanel(state.message, onLink)
                 } else {
                     OfflineStrip(state.message, onRefresh)
                 }
@@ -371,7 +371,7 @@ private fun NotLinkedPanel(onLink: () -> Unit) {
 }
 
 @Composable
-private fun RelinkPanel(message: String, onLink: () -> Unit) {
+private fun RelayRejectedPanel(message: String, onLink: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.errorContainer,

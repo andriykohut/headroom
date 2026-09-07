@@ -112,21 +112,6 @@ the notch/weight/hatching vocabulary that already works.
 
 ## Deliberately not done
 
-### The app still carries the machinery of the old design
-
-`UsageApi` refreshes on 401 and honours a `Retry-After` rate-limit gate;
-`CredentialStore` can renew a token. A relay returns none of those things, so
-all of it is dormant.
-
-**Why it is still there:** it is tested, it is harmless, and deleting it is a
-change to the half of the system that is currently working and installed on a
-phone. Removing it should be its own commit with its own verification pass, not
-a footnote to the architecture change.
-
-**How to settle it:** delete the refresh path, the `RateLimitGate`, and the
-"Re-link needed" surface; keep the offline/stale-reading behaviour, which is
-still load-bearing. Then re-run `docs/verification.md`.
-
 ### Minification is off
 
 R8 would cut the release APK substantially. The remaining bulk is native code
@@ -168,6 +153,33 @@ stays where it is, because the cost of being wrong is a day-long lockout that
 also takes out Claude Code.
 
 ## Settled by the architecture change
+
+### The old design's machinery is gone from the app
+
+Done 2026-09-07. Deleted: the token refresh path (`CredentialStore.refresh`,
+`RefreshFailedException`, and the form post in `ImportedCredentialStore`), the
+persisted rate-limit gate (`RateLimitGate`, `DataStoreRateLimitGate`,
+`RateLimitedException`, `Retry-After` parsing and the backoff constants), and
+the `atWall` parameter threaded through four call sites - a relay ignores query
+strings, so `at_wall=1&skip_spend=1` did nothing.
+
+**What was deliberately *not* deleted.** The "scan a new code" surface looked
+dead and is not. A relay mints nothing and expires nothing, so it never returns
+401 for a reason the app can fix by itself - but it does return 401 when the
+secret is wrong or has been rotated on the relay, and that is a real thing a
+user must be told about. So the panel and its notification channel were rewired
+onto a new `RelayRejectedException` (401 or 403) rather than removed. Deleting
+them would have traded a dead code path for a silent failure, which is the one
+thing this app is built not to have.
+
+The notification channel id stays `relink_needed` and the storage keys keep
+their names: both are frozen, because changing them orphans settings and stored
+values in installs that already exist.
+
+`ImportedCredentialStore` still persists all six payload fields, three of which
+nothing reads. They are the wire contract with the generator and with installed
+app versions; dropping them is a format change, not a cleanup.
+
 
 ### The staleness line now measures the reading, not the fetch
 

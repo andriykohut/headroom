@@ -25,7 +25,7 @@ class AndroidNotifier(private val context: Context) : Notifier {
         }
         manager.createNotificationChannel(
             NotificationChannel(
-                RELINK_CHANNEL_ID,
+                RELAY_REJECTED_CHANNEL_ID,
                 "Your relay refused this phone",
                 NotificationManager.IMPORTANCE_HIGH,
             ),
@@ -41,11 +41,11 @@ class AndroidNotifier(private val context: Context) : Notifier {
         )
     }
 
-    override fun notifyRelinkNeeded(message: String) {
+    override fun notifyRelayRejected(message: String) {
         post(
-            channelId = RELINK_CHANNEL_ID,
-            id = RELINK_NOTIFICATION_ID,
-            title = "Headroom needs re-linking",
+            channelId = RELAY_REJECTED_CHANNEL_ID,
+            id = RELAY_REJECTED_NOTIFICATION_ID,
+            title = "Your relay refused this phone",
             body = message,
         )
     }
@@ -66,6 +66,6 @@ class AndroidNotifier(private val context: Context) : Notifier {
     }
 
     private companion object {
-        const val RELINK_NOTIFICATION_ID = 1
+        const val RELAY_REJECTED_NOTIFICATION_ID = 1
     }
 }

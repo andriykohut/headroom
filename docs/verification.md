@@ -14,9 +14,9 @@ Run on **2026-09-06**, against a real subscription account.
 | Suite | Tests |
 | --- | --- |
 | `:domain:test` | 53 |
-| `:app:testDebugUnitTest` | 129 |
+| `:app:testDebugUnitTest` | 110 |
 | `cli` (`cargo test`) | 65 |
-| **Total** | **247** |
+| **Total** | **228** |
 
 All green.
 
