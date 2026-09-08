@@ -1,0 +1,72 @@
+name: Publish the crate
+
+# Separate from the release workflow because a crates.io version can be yanked
+# but never removed, and a tag is easy to push by accident. The gates below
+# rebuild what the release workflow gave this step, and add the one it could
+# not: someone who looked at the release first.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Released tag to publish, e.g. v0.2.0'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    env:
+      # Through the environment, not `${{ }}` inside a `run:`: a dispatch input
+      # is attacker-controlled, and $TAG cannot become shell syntax.
+      TAG: ${{ github.event.inputs.tag }}
+    steps:
+      - name: Refuse a prerelease
+        run: |
+          case "$TAG" in
+            *-*)
+              echo "::error::$TAG is a prerelease, and crates.io versions cannot be removed." >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with:
+          # Without this, a dispatch from main publishes main's tree under the
+          # tag's version number and nothing downstream notices.
+          ref: refs/tags/${{ github.event.inputs.tag }}
+
+      - name: The tag and the manifest must agree
+        run: scripts/check-version.sh "$TAG"
+
+      - name: The release must exist, and must have finished
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A crate whose release never completed points at binaries nobody can
+          # download.
+          if ! gh release view "$TAG" --json isDraft,isPrerelease > release.json; then
+            echo "::error::no release exists for $TAG. Cut the release first." >&2
+            exit 1
+          fi
+          cat release.json
+          if [ "$(jq -r .isDraft release.json)" != "false" ]; then
+            echo "::error::the release for $TAG is still a draft." >&2
+            exit 1
+          fi
+          if [ "$(jq -r .isPrerelease release.json)" != "false" ]; then
+            echo "::error::the release for $TAG is marked prerelease." >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rehearse
+        run: cargo publish --dry-run --locked --manifest-path cli/Cargo.toml
+
+      - name: Publish
+        run: cargo publish --locked --manifest-path cli/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}

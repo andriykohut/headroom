@@ -41,6 +41,16 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
 
+      # This job's default working directory is cli/, but the installer
+      # lives at the repo root alongside the other release scripts.
+      - name: Lint the shell scripts
+        working-directory: ${{ github.workspace }}
+        run: shellcheck scripts/*.sh
+
+      - name: Test the installer's platform detection
+        working-directory: ${{ github.workspace }}
+        run: scripts/install.test.sh
+
       # Includes tests/push_does_not_block.rs, which times the status line hook
       # against a relay that accepts connections and never answers. That one
       # guards a promise the user feels on every prompt, so a slow or contended

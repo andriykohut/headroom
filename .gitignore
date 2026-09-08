@@ -33,3 +33,6 @@ docs/superpowers/
 
 # Rust build output
 cli/target/
+
+# Binaries staged for the container image build (see .github/workflows/release.yml)
+dist/

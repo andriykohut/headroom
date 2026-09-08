@@ -1,7 +1,10 @@
 [package]
-name = "headroom"
+name = "headroom-cli"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+keywords = ["claude", "usage", "cli", "android"]
+categories = ["command-line-utilities"]
 # 1.89 is where `File::try_lock` landed in std. `push` takes an advisory
 # lock so that several Claude Code sessions on one machine cost one request
 # between them, and doing it without std would mean a libc dependency.
@@ -9,6 +12,12 @@ rust-version = "1.89"
 description = "Push Claude Code usage from your machine to a Headroom relay, and serve it to the phone"
 license = "Apache-2.0"
 repository = "https://github.com/andriykohut/headroom"
+
+# The package is headroom-cli because `headroom` on crates.io is an
+# unrelated abandoned crate. The command people type is unaffected.
+[[bin]]
+name = "headroom"
+path = "src/main.rs"
 
 [dependencies]
 # Every dependency here is MIT or Apache-2.0. Nothing copyleft, nothing that

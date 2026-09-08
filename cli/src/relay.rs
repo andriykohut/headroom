@@ -304,6 +304,11 @@ fn unix_time() -> u64 {
 
 /// Run the relay until a worker fails.
 ///
+/// `listening` is called once, with the address actually bound, as soon as
+/// connections are being accepted. Port 0 asks the kernel for a free one, and
+/// this is the only way to learn which; it is also the point after which a
+/// caller may connect, which a message printed before binding is not.
+///
 /// hyper on a two-thread tokio runtime, rather than a thread-per-connection
 /// server, for one reason: every limit below has to exist somewhere, and the
 /// obvious lighter choice offered no way to set any of them. A relay on a
@@ -315,6 +320,7 @@ pub fn serve(
     port: u16,
     max_connections: usize,
     header_timeout: Duration,
+    listening: impl FnOnce(SocketAddr),
 ) -> Result<(), String> {
     let address: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -326,7 +332,13 @@ pub fn serve(
         .build()
         .map_err(|error| format!("could not start the runtime: {error}"))?;
 
-    runtime.block_on(accept_loop(Arc::new(relay), address, max_connections.max(1), header_timeout))
+    runtime.block_on(accept_loop(
+        Arc::new(relay),
+        address,
+        max_connections.max(1),
+        header_timeout,
+        listening,
+    ))
 }
 
 async fn accept_loop(
@@ -334,10 +346,15 @@ async fn accept_loop(
     address: SocketAddr,
     max_connections: usize,
     header_timeout: Duration,
+    listening: impl FnOnce(SocketAddr),
 ) -> Result<(), String> {
     let listener = TcpListener::bind(address)
         .await
         .map_err(|error| format!("could not listen on {address}: {error}"))?;
+    let bound = listener
+        .local_addr()
+        .map_err(|error| format!("could not read the address bound on {address}: {error}"))?;
+    listening(bound);
     // Bounded, so a flood costs waiting rather than memory. Acquiring before
     // accepting is what applies the back-pressure: past the ceiling, new
     // connections stay in the kernel's queue instead of becoming tasks.

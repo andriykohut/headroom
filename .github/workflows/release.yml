@@ -13,11 +13,246 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish a signed APK
+  version:
+    name: Tag and manifest must agree
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      # No checkout here: this step only reads workflow-context expressions
+      # (github.event_name, github.event.inputs.tag, github.ref_name), so it
+      # needs no working tree, and it must run before the checkout below can
+      # know which ref to pin to.
+      - id: resolve
+        # GITHUB_REF_NAME/github.ref_name is the BRANCH the run was
+        # dispatched from under workflow_dispatch, not empty, so a shell
+        # ${VAR:-default} fallback never fires there. Decide on the event
+        # instead, and publish the result once so every other job (and any
+        # future one) consumes this single resolved value instead of
+        # re-deriving it.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ github.event.inputs.tag }}"
+          else
+            version="${{ github.ref_name }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Pinned to the tag itself, not github.sha: under workflow_dispatch
+      # github.sha is whatever ref "Use workflow from" was run against
+      # (typically main), completely decoupled from the tag typed into the
+      # input. Checking out the tag here means check-version.sh below
+      # compares the manifest AT THE TAGGED COMMIT, which is the gate this
+      # job exists to run - and it fails loudly if that tag does not exist,
+      # which is correct: this input is documented as "Tag to build".
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.resolve.outputs.version }}
+      - run: scripts/check-version.sh "${{ steps.resolve.outputs.version }}"
+
+  binaries:
+    name: Build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One target failing (a flaky runner, a transient network blip)
+      # should not cancel the other three - especially on a first run,
+      # where all four results are what tells you whether the pipeline
+      # itself works.
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners throughout. A macOS binary cross-compiled from
+          # Linux carries no signature and Apple Silicon refuses to execute
+          # it at all; building on macOS gets the linker's ad-hoc signature
+          # for free. And aarch64-musl avoids cross-compiling ring.
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    steps:
+      # Pinned to the tag: github.sha under workflow_dispatch is the ref
+      # "Use workflow from" was run against (typically main), not the tag
+      # typed into the input. Without this, a binary built from main could
+      # get uploaded as if it were the tagged release.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
+
+      # The binaries strangers install should come from the same toolchain
+      # ci.yml tests against, not whatever Rust the runner image happens
+      # to ship.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Name it after its target
+        run: cp cli/target/${{ matrix.target }}/release/headroom headroom-${{ matrix.target }}
+
+      - name: It must run, and say the version being released
+        # Every target is built on a runner of its own architecture, so every
+        # one of them can be executed here rather than by whoever downloads it.
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ./headroom-${{ matrix.target }} --version
+          ./headroom-${{ matrix.target }} --version | grep -q "${VERSION#v}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: headroom-${{ matrix.target }}
+          if-no-files-found: error
+
+  checksums:
+    name: Checksum every asset
+    needs: binaries
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+      # GNU coreutils sha256sum, not macOS shasum: scripts/install.sh matches
+      # "<hash>  <basename>" with the basename anchored at end-of-line, and
+      # shasum's "SHA256 (name) = hash" format would break every install.
+      - run: sha256sum headroom-* | tee SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: |
+            headroom-*
+            SHA256SUMS
+          if-no-files-found: error
+
+  image:
+    name: Publish the relay image
+    # release, not just checksums: a failing check-distribution.sh or
+    # debuggable-APK check in `release` must stop this from pushing to
+    # GHCR and moving `:latest`, the same way it stops everything else.
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: staged
+
+      - name: Lay the binaries out the way the Dockerfile expects
+        run: |
+          mkdir -p dist
+          cp staged/headroom-x86_64-unknown-linux-musl  dist/headroom-linux-amd64
+          cp staged/headroom-aarch64-unknown-linux-musl dist/headroom-linux-arm64
+          chmod +x dist/headroom-linux-*
+          # An empty directory the Dockerfile's COPY --chown gives to uid
+          # 65534, since scratch has no RUN mkdir to do it inside the image.
+          mkdir -p dist/data
+
+      - uses: docker/setup-buildx-action@v3
+
+      # A broken image must never reach ghcr before something has checked it.
+      # Buildx cannot `load` a multi-platform build into the local engine, so
+      # this is the runner's own architecture only, kept off the registry
+      # (push: false), and tested right here. The buildx builder set up above
+      # persists for the rest of the job, so the real multi-arch build below
+      # reuses this one's cached layers rather than starting cold.
+      - name: Build a local, single-arch image to smoke test before anything is public
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: headroom-smoke-test
+
+      - name: Smoke test the freshly built image
+        run: |
+          docker run -d --name relay -p 8765:8765 \
+            -e HEADROOM_RELAY_SECRET=smoke-test \
+            headroom-smoke-test
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8765/healthz > health.json; then break; fi
+            sleep 0.5
+          done
+          cat health.json
+          grep -q '"ok":false' health.json
+
+      - name: Diagnose a failed smoke test
+        if: failure()
+        run: |
+          docker ps -a
+          docker logs relay
+
+      - name: Stop the smoke-test container
+        if: always()
+        run: docker rm -f relay 2>/dev/null || true
+
+      # latest must move only for a real release. A throwaway prerelease tag
+      # like v0.0.1-rc1 (the plan's own verification tag) must not repoint
+      # latest at a release candidate - especially since deleting that
+      # package version afterwards removes the manifest both tags share,
+      # leaving no `latest` behind at all. A dash marks a prerelease
+      # (v1.0.0-beta.2, v0.0.1-rc1); a bare vX.Y.Z has none.
+      - name: Decide which tags this build gets
+        id: tags
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          tags="ghcr.io/${REPO}:${VERSION}"
+          case "$VERSION" in
+            *-*) : ;;  # prerelease (e.g. v0.0.1-rc1): version tag only
+            *) tags="$(printf '%s\nghcr.io/%s:latest' "$tags" "$REPO")" ;;
+          esac
+          {
+            echo "tags<<TAGS_EOF"
+            echo "$tags"
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the multi-arch image, now that it has been tested
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+
+  release:
+    name: Build and publish a signed APK
+    needs: [version, checksums]
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
 
       # A release must clear the same bar as any other build, and then some:
       # this artifact is the one strangers install.
@@ -58,18 +293,21 @@ jobs:
           } > keystore.properties
 
       - name: Build the release APK
+        env:
+          HEADROOM_VERSION: ${{ needs.version.outputs.version }}
         run: ./gradlew :app:assembleRelease
 
       # Obtainium tracks a repository's releases and matches assets by name, so
       # the name has to be stable across releases and carry the version.
       - name: Name the artifact
         id: artifact
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          name="headroom-${version}.apk"
+          name="headroom-${VERSION}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify what is about to be published
         run: |
@@ -84,14 +322,66 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: .
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.artifact.outputs.version }}
-          files: ${{ steps.artifact.outputs.name }}
+          # A dash marks a prerelease (v1.0.0-beta.2, v0.0.1-rc1); a bare
+          # vX.Y.Z has none. GitHub's releases/latest (what install.sh and
+          # the README's manual path both resolve) excludes anything marked
+          # prerelease, so a rehearsal tag never becomes what strangers get.
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
+          # Named explicitly rather than with a `headroom-*` glob: the APK
+          # above is also named headroom-<version>.apk, and a wildcard here
+          # would match it too, uploading the same asset twice. These four
+          # must track the `binaries` job's matrix targets exactly.
+          files: |
+            ${{ steps.artifact.outputs.name }}
+            headroom-aarch64-apple-darwin
+            headroom-x86_64-apple-darwin
+            headroom-x86_64-unknown-linux-musl
+            headroom-aarch64-unknown-linux-musl
+            SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: true
 
       - name: Remove the signing key from the runner
         if: always()
+        # Best-effort cleanup of two files on an ephemeral runner. `release`
+        # gates `crate` and `installer` on its job status now, so a spurious
+        # failure here must never fail the job (and so block a publish and
+        # an install check) after Publish has already made the release
+        # public.
+        continue-on-error: true
         run: rm -f headroom-release.keystore keystore.properties
+
+  installer:
+    name: Install it the way a stranger would (${{ matrix.runner }})
+    needs: [version, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # Pinned to the tag; see the `binaries` job for why github.sha alone
+      # is not safe under workflow_dispatch.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.version.outputs.version }}
+      - name: Run the installer against the release just published
+        env:
+          HEADROOM_VERSION: ${{ needs.version.outputs.version }}
+          HEADROOM_INSTALL_DIR: ${{ runner.temp }}/bin
+        run: sh scripts/install.sh
+      - name: The installed binary must run and know its version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          "${{ runner.temp }}/bin/headroom" --version
+          "${{ runner.temp }}/bin/headroom" --version | grep -q "${VERSION#v}"
