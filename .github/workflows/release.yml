@@ -360,38 +360,6 @@ jobs:
         continue-on-error: true
         run: rm -f headroom-release.keystore keystore.properties
 
-  crate:
-    name: Publish to crates.io
-    # installer is included so the comment below is actually true: an
-    # irreversible publish should wait on the release having been proven
-    # installable, not just built. image is included too: it is the only
-    # place a Linux binary is ever run as a server (the smoke test), and a
-    # failure there must stop this publish as much as a failing installer
-    # does.
-    needs: [version, release, installer, image]
-    # A crates.io publish can be yanked but never removed. The plan's
-    # rehearsal tags (e.g. v0.0.1-rc1) exist to exercise this whole
-    # pipeline, not to leave a permanent rc version on crates.io, so
-    # prereleases skip this job entirely rather than relying on the
-    # absence of CRATES_IO_TOKEN to save us.
-    if: ${{ !contains(needs.version.outputs.version, '-') }}
-    runs-on: ubuntu-latest
-    steps:
-      # Pinned to the tag; see the `binaries` job for why github.sha alone
-      # is not safe under workflow_dispatch.
-      - uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ needs.version.outputs.version }}
-      - uses: dtolnay/rust-toolchain@stable
-      - run: scripts/check-version.sh "${{ needs.version.outputs.version }}"
-      # Last, and only after every other gate (the release, its binaries,
-      # its checksums, the installer, and the published image) has passed:
-      # a crates.io version can never be unpublished, so nothing should
-      # reach it that has not already survived every other gate.
-      - run: cargo publish --locked --manifest-path cli/Cargo.toml
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-
   installer:
     name: Install it the way a stranger would (${{ matrix.runner }})
     needs: [version, release]

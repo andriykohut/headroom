@@ -40,10 +40,30 @@ fails the release if they disagree.
 The workflow then checks the versions agree, builds four binaries on native
 runners, checksums them, builds and smoke-tests the container, publishes the
 GitHub release with the APK and the binaries, and publishes the crate last —
-a crates.io version cannot be unpublished, so it goes after every other gate.
+a crates.io version cannot be unpublished.
 
-Needs two secrets beyond the APK signing keys: `CRATES_IO_TOKEN`, and the
-built-in `GITHUB_TOKEN` for ghcr.io.
+## Publishing the crate is a second, deliberate step
+
+Pushing a tag does **not** publish to crates.io. That one action cannot be
+undone — a version can be yanked but never removed — and a tag is easy to push
+by accident, so it lives in its own workflow that only a person can start:
+
+    gh workflow run "Publish the crate" -f tag=vX.Y.Z
+
+Do it after the release has been cut and you have looked at it. The workflow
+refuses a prerelease, checks out the tag rather than whatever branch it was
+dispatched from, re-checks the tag against `cli/Cargo.toml`, confirms a
+finished non-draft non-prerelease release actually exists for that tag, and
+rehearses with `--dry-run` before the real publish.
+
+Until the first couple of releases have gone through cleanly, that separation
+is doing real work: before the token existed, its absence was the only thing
+stopping a rehearsal tag from publishing permanently.
+
+Needs two secrets beyond the APK signing keys: `CRATES_IO_TOKEN` (used only by
+that workflow, and it must carry the `publish-new` scope for the very first
+publish, not just `publish-update`), and the built-in `GITHUB_TOKEN` for
+ghcr.io.
 
 Tags must be `vMAJOR.MINOR.PATCH`, optionally with a `-` suffix for a
 prerelease (`v0.0.1-rc1`). Anything that fails that shape builds the app with

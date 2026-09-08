@@ -1,0 +1,81 @@
+name: Publish the crate
+
+# Deliberately not part of the release workflow, and deliberately not automatic.
+#
+# A crates.io version can be yanked but never removed, so this is the one step
+# in the whole pipeline that cannot be undone or retried. It is a separate,
+# human-triggered act taken *after* a release has been seen to work, rather
+# than a side effect of pushing a tag: pushing a tag is easy to do by accident,
+# and the consequences of getting this one wrong are permanent.
+#
+# The gates below reconstruct what the release workflow would have given us,
+# and add the one it could not: a person who looked at the release first.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Released tag to publish, e.g. v0.2.0'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    env:
+      # Via the environment rather than interpolated straight into a `run:`
+      # block: a dispatch input is attacker-controlled in principle, and
+      # `$TAG` cannot become shell syntax the way `${{ ... }}` can.
+      TAG: ${{ github.event.inputs.tag }}
+    steps:
+      - name: Refuse a prerelease
+        run: |
+          case "$TAG" in
+            *-*)
+              echo "::error::$TAG is a prerelease. crates.io versions cannot be removed," \
+                   "so rehearsal tags must never reach it." >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with:
+          # The tag, not the branch this was dispatched from. Without this a
+          # dispatch from `main` would publish main's tree under the tag's
+          # version number, and nothing downstream would notice.
+          ref: refs/tags/${{ github.event.inputs.tag }}
+
+      - name: The tag and the manifest must agree
+        run: scripts/check-version.sh "$TAG"
+
+      - name: The release must exist, and must have finished
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Publishing a version whose release never completed would leave a
+          # crate on the registry pointing at binaries nobody can download.
+          if ! gh release view "$TAG" --json isDraft,isPrerelease > release.json; then
+            echo "::error::no release exists for $TAG. Cut the release first." >&2
+            exit 1
+          fi
+          cat release.json
+          if [ "$(jq -r .isDraft release.json)" != "false" ]; then
+            echo "::error::the release for $TAG is still a draft." >&2
+            exit 1
+          fi
+          if [ "$(jq -r .isPrerelease release.json)" != "false" ]; then
+            echo "::error::the release for $TAG is marked prerelease." >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rehearse
+        run: cargo publish --dry-run --locked --manifest-path cli/Cargo.toml
+
+      - name: Publish
+        run: cargo publish --locked --manifest-path cli/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
