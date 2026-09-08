@@ -5,9 +5,8 @@
 //! session and the seven-day week. They arrive on a response the user paid for
 //! anyway, so reporting them costs no request at all.
 //!
-//! What it does not carry is the per-model weekly window - the one that shows
-//! up as a separate bar. That needs the usage endpoint, which costs a request,
-//! which is why `push` fetches it on a timer rather than every message.
+//! These two windows are all there is. The per-model weekly windows are not in
+//! this payload and have no supported source, so Headroom does not show them.
 
 use serde::Deserialize;
 use serde_json::{Value, json};

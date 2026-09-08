@@ -10,7 +10,6 @@
 //! optional: a phone on a mobile network has no address anything can push to.
 //! What the relay does *not* do is hold a credential - see `relay.rs`.
 
-mod claude;
 mod link;
 mod payload;
 mod push;
@@ -49,9 +48,6 @@ enum Commands {
         /// Read the secret from a file instead, so it is not in your shell history.
         #[arg(long)]
         secret_file: Option<PathBuf>,
-        /// Seconds between full fetches of the per-model windows.
-        #[arg(long, env = "HEADROOM_ENRICH_INTERVAL", default_value_t = push::DEFAULT_ENRICH_INTERVAL)]
-        interval: u64,
         /// Do the work here and report it, instead of detaching. For checking
         /// that your setup works; never use it in a real status line.
         #[arg(long)]
@@ -137,10 +133,9 @@ fn main() {
 
 fn dispatch() -> i32 {
     match Cli::parse().command {
-        Commands::Push { relay, secret, secret_file, interval, once, deliver } => {
-            let interval = interval.max(push::MIN_ENRICH_INTERVAL);
+        Commands::Push { relay, secret, secret_file, once, deliver } => {
             let config = match (relay, read_secret(secret, secret_file)) {
-                (Some(relay), Some(secret)) => Some(push::Config { relay, secret, interval }),
+                (Some(relay), Some(secret)) => Some(push::Config { relay, secret }),
                 // Not configured yet. The status line still has to work, so
                 // this is silent rather than an error on every prompt.
                 _ => None,
