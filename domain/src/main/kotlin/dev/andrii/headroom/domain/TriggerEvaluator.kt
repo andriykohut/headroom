@@ -19,7 +19,7 @@ class TriggerEvaluator {
         for (bucket in current.buckets) {
             if (bucket.kind == BucketKind.UNKNOWN) continue
             val before = previous?.buckets?.firstOrNull { it.identity == bucket.identity }
-            resetEvent(bucket, settings, nowEpochSeconds)?.let(events::add)
+            resetEvent(bucket, current, settings, nowEpochSeconds)?.let(events::add)
             thresholdEvent(bucket, before, settings)?.let(events::add)
             wallEvent(bucket, before, settings)?.let(events::add)
         }
@@ -28,6 +28,7 @@ class TriggerEvaluator {
 
     private fun resetEvent(
         bucket: LimitBucket,
+        current: UsageSnapshot,
         settings: TriggerSettings,
         now: Long,
     ): NotificationEvent? {
@@ -46,7 +47,8 @@ class TriggerEvaluator {
         return NotificationEvent(
             key = EventKey(bucket.identity, bucket.resetsAt, type),
             title = "${bucket.title} reset",
-            body = "Your ${bucket.title.lowercase()} limit has reset — you have capacity again.",
+            body = "Your ${bucket.title.lowercase()} limit has reset — you have capacity again." +
+                weeklyContext(bucket, current),
         )
     }
 
@@ -108,6 +110,20 @@ class TriggerEvaluator {
             body = "You've used all of your ${bucket.title.lowercase()} limit. " +
                 "It lifts when the window resets.",
         )
+    }
+
+    /**
+     * What is left of the week, appended to a session reset.
+     *
+     * A session reset arrives in the middle of the night and the useful
+     * question is whether the fresh session is worth spending, which the week
+     * answers and the session cannot. Blank for a weekly reset, which has no
+     * larger window to report, and blank when there is no weekly bucket.
+     */
+    private fun weeklyContext(bucket: LimitBucket, current: UsageSnapshot): String {
+        if (bucket.kind != BucketKind.SESSION) return ""
+        val weekly = current.bucket(BucketKind.WEEKLY_ALL) ?: return ""
+        return " Week at ${weekly.utilization.toInt()}%."
     }
 
     private fun windowLength(kind: BucketKind): Long = when (kind) {

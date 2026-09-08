@@ -239,4 +239,32 @@ class TriggerEvaluatorTest {
         val second = evaluate(null, current, now = 2_000, fired = first.map { it.key }.toSet())
         assertTrue(second.isEmpty(), "re-running with prior keys must produce nothing")
     }
+
+    @Test
+    fun `a session reset says what is left of the week`() {
+        // The headline event arrives at 02:14 with no context. Whether the
+        // fresh session is worth spending depends on the week, and the
+        // evaluator is holding that figure already.
+        val events = evaluate(
+            previous = null,
+            current = snapshot(
+                bucket(BucketKind.SESSION, resetsAt = 900),
+                bucket(BucketKind.WEEKLY_ALL, utilization = 61.0, resetsAt = 500_000),
+                at = 1_000,
+            ),
+            now = 1_000,
+        )
+        val reset = events.single { it.key.type == TriggerType.SESSION_RESET }
+        assertTrue(reset.body.contains("61%"), "no weekly figure in: ${reset.body}")
+    }
+
+    @Test
+    fun `a session reset with no weekly window still notifies`() {
+        val events = evaluate(
+            previous = null,
+            current = snapshot(bucket(BucketKind.SESSION, resetsAt = 900), at = 1_000),
+            now = 1_000,
+        )
+        assertEquals(1, events.count { it.key.type == TriggerType.SESSION_RESET })
+    }
 }

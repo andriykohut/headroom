@@ -92,4 +92,20 @@ class AgeFormatTest {
     fun `reset time with no known instant renders nothing`() {
         assertEquals(null, formatResetTime(0, ZoneId.of("UTC")))
     }
+
+    @Test
+    fun `a reading that outlived its freshness is dated, not aged`() {
+        // "14 hr ago" reads as a fault the phone should retry; a wall-clock
+        // time reads as "that is when the machine stopped reporting", which is
+        // what actually happened.
+        assertEquals(
+            "Sat 10:42",
+            formatLastReported(1_788_000_120, ZoneOffset.UTC),
+        )
+    }
+
+    @Test
+    fun `a reading with no timestamp is not dated at all`() {
+        assertEquals(null, formatLastReported(0, ZoneOffset.UTC))
+    }
 }

@@ -15,6 +15,7 @@ mod payload;
 mod push;
 mod relay;
 mod statusline;
+mod usage_log;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -48,6 +49,10 @@ enum Commands {
         /// Read the secret from a file instead, so it is not in your shell history.
         #[arg(long)]
         secret_file: Option<PathBuf>,
+        /// Append every changed reading to this file, and nothing else. Local
+        /// to this machine; never sent anywhere. Off unless you name a path.
+        #[arg(long)]
+        log: Option<PathBuf>,
         /// Do the work here and report it, instead of detaching. For checking
         /// that your setup works; never use it in a real status line.
         #[arg(long)]
@@ -133,9 +138,9 @@ fn main() {
 
 fn dispatch() -> i32 {
     match Cli::parse().command {
-        Commands::Push { relay, secret, secret_file, once, deliver } => {
+        Commands::Push { relay, secret, secret_file, log, once, deliver } => {
             let config = match (relay, read_secret(secret, secret_file)) {
-                (Some(relay), Some(secret)) => Some(push::Config { relay, secret }),
+                (Some(relay), Some(secret)) => Some(push::Config { relay, secret, log }),
                 // Not configured yet. The status line still has to work, so
                 // this is silent rather than an error on every prompt.
                 _ => None,

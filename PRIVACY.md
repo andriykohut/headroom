@@ -15,7 +15,7 @@ There are three pieces, and it is worth being clear about which is which:
 | --- | --- | --- |
 | The **app** | Your phone | The relay's address and its read-only key |
 | The **relay** (`headroom serve`) | A machine you control | The last usage reading |
-| The **CLI** (`headroom push`) | The machine you code on | Nothing; it reads and forwards |
+| The **CLI** (`headroom push`) | The machine you code on | Nothing, unless you pass `--log`; it reads and forwards |
 
 ## What the app stores, on the device only
 
@@ -84,6 +84,12 @@ your relay; the numbers arrived on a response you had already paid for.
 It never reads, writes or touches Claude Code's credential store, and it never
 contacts the provider. `scripts/check-distribution.sh` fails the build if that
 stops being true.
+
+`--log <path>` is the one thing it will write, and only if you ask for it by
+naming a file. It appends a CSV row — timestamp, the two percentages and their
+reset times — whenever a figure changes. The file stays on that machine and is
+never sent anywhere, including to your relay. Without the flag, nothing is
+written at all.
 
 `headroom link` renders your relay's address and secret as a QR code in your
 terminal. It writes nothing to disk and contacts no server.

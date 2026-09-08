@@ -63,4 +63,39 @@ data class LimitBucket(
      */
     val identity: String
         get() = if (scopeLabel.isBlank()) rawKind else "$rawKind:$scopeLabel"
+
+    /**
+     * Whether [now] is past this window's rollover, making [utilization] a
+     * figure for a window that has ended.
+     *
+     * A reading can outlive its window: the machine that reports it is asleep,
+     * so the last number keeps describing a window that has since rolled over.
+     * Drawing it as current tells someone they are at a limit that has lifted.
+     *
+     * False when [resetsAt] is 0, which is how the parser records a reset time
+     * the server did not send - an unknown time is not a past one.
+     */
+    fun hasReset(now: Long): Boolean = resetsAt > 0 && now >= resetsAt
+
+    /**
+     * How much of this window has elapsed, 0.0 to 1.0, or null when the
+     * question does not apply.
+     *
+     * Compared against [utilization] this is the whole of "burn rate" for a
+     * weekly window: fill ahead of the mark means spending faster than an even
+     * pace would. Null for a session, where bursts are the point and an even
+     * pace is nobody's goal, and null without a reset time to measure from.
+     */
+    fun elapsedFraction(now: Long): Double? {
+        if (resetsAt <= 0) return null
+        val window = when (kind) {
+            BucketKind.WEEKLY_ALL, BucketKind.WEEKLY_SCOPED -> SEVEN_DAYS
+            else -> return null
+        }
+        return ((window - (resetsAt - now)).toDouble() / window).coerceIn(0.0, 1.0)
+    }
+
+    private companion object {
+        const val SEVEN_DAYS = 604_800L
+    }
 }

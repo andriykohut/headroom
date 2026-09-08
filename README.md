@@ -269,6 +269,12 @@ Check it with `headroom push --once`, which does the work in the foreground and
 says what happened instead of detaching. Never leave `--once` in a real status
 line.
 
+If you want to keep the numbers rather than only see the latest, add
+`--log ~/.local/state/headroom/usage.csv`. It appends a row whenever a figure
+changes — timestamp, both percentages, both reset times — and that file never
+leaves the machine. The relay keeps only the last reading by design, so this is
+the only place a history exists.
+
 **It cannot slow your prompt down.** `push` writes your payload back out, hands
 the network to a detached child, and exits — 2.6 ms median, 3.4 ms worst case,
 and the same against a relay that accepts the connection and never answers.

@@ -19,10 +19,20 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** The three states a bar can be in. Colour is never the only thing that differs. */
-enum class BarState { FINE, APPROACHING, WALL }
+/** The states a bar can be in. Colour is never the only thing that differs. */
+enum class BarState { FINE, APPROACHING, WALL, RESET }
 
-fun barState(percentUsed: Double, thresholdPercent: Double): BarState = when {
+/**
+ * [hasReset] outranks the percentage because it invalidates it: the window that
+ * figure described has ended, so drawing 100% as the wall would announce a
+ * limit that has already lifted.
+ */
+fun barState(
+    percentUsed: Double,
+    thresholdPercent: Double,
+    hasReset: Boolean = false,
+): BarState = when {
+    hasReset -> BarState.RESET
     percentUsed >= 100.0 -> BarState.WALL
     percentUsed >= thresholdPercent -> BarState.APPROACHING
     else -> BarState.FINE
@@ -36,7 +46,8 @@ fun barState(percentUsed: Double, thresholdPercent: Double): BarState = when {
  *
  * The notch is always drawn, whatever the trigger toggles say: it marks where
  * the user's own warning line sits, so crossing it is legible as geometry
- * rather than only as a colour change. That is what lets the three states
+ * rather than only as a colour change. That is what lets the three
+ * utilisation states
  * survive greyscale, a glance, and colour-blindness.
  */
 @Composable
@@ -46,12 +57,17 @@ fun UsageBar(
     modifier: Modifier = Modifier,
     hero: Boolean = false,
     dimmed: Boolean = false,
+    hasReset: Boolean = false,
+    paceFraction: Double? = null,
 ) {
     val colors = MaterialTheme.colorScheme
-    val state = barState(percentUsed, thresholdPercent)
+    val state = barState(percentUsed, thresholdPercent, hasReset)
 
     val fraction by animateFloatAsState(
-        targetValue = (percentUsed / 100.0).coerceIn(0.0, 1.0).toFloat(),
+        // An ended window has no fill to show: the figure belongs to a window
+        // that is over, and the new one is unmeasured until the next push.
+        targetValue = if (state == BarState.RESET) 0f
+        else (percentUsed / 100.0).coerceIn(0.0, 1.0).toFloat(),
         animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
         label = "fill",
     )
@@ -64,24 +80,34 @@ fun UsageBar(
     val fillColor = when (state) {
         BarState.FINE -> colors.primary
         BarState.APPROACHING -> colors.tertiary
-        BarState.WALL -> Color.Transparent
+        BarState.WALL, BarState.RESET -> Color.Transparent
     }
     val hatchColor = colors.error
     val notchColor = colors.surface
+    val paceColor = colors.onSurfaceVariant
     val height: Dp = if (hero) HERO_HEIGHT else COMPACT_HEIGHT
 
-    Canvas(modifier = modifier.fillMaxWidth().height(height)) {
-        val radius = CornerRadius(size.height / 2f, size.height / 2f)
+    // Room beneath the track for the pace mark, and only when one is drawn:
+    // without it the mark would be clipped by the canvas it sits under.
+    val paceRoom = if (paceFraction != null) PACE_GAP + PACE_HEIGHT else 0.dp
+
+    Canvas(modifier = modifier.fillMaxWidth().height(height + paceRoom)) {
+        val trackHeight = size.height - paceRoom.toPx()
+        val radius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
         val rounded = Path().apply {
             addRoundRect(
                 androidx.compose.ui.geometry.RoundRect(
-                    left = 0f, top = 0f, right = size.width, bottom = size.height,
+                    left = 0f, top = 0f, right = size.width, bottom = trackHeight,
                     cornerRadius = radius,
                 ),
             )
         }
 
-        drawRoundRect(color = trackColor.copy(alpha = alpha), cornerRadius = radius)
+        drawRoundRect(
+            color = trackColor.copy(alpha = alpha),
+            size = Size(size.width, trackHeight),
+            cornerRadius = radius,
+        )
 
         if (state == BarState.WALL) {
             // Blocked off edge to edge. The hatch is the part that reads with
@@ -90,12 +116,12 @@ fun UsageBar(
             clipPath(rounded) {
                 val pitch = HATCH_PITCH.toPx()
                 val stroke = HATCH_STROKE.toPx()
-                var x = -size.height
-                while (x < size.width + size.height) {
+                var x = -trackHeight
+                while (x < size.width + trackHeight) {
                     drawLine(
                         color = hatchColor.copy(alpha = alpha),
-                        start = Offset(x, size.height),
-                        end = Offset(x + size.height, 0f),
+                        start = Offset(x, trackHeight),
+                        end = Offset(x + trackHeight, 0f),
                         strokeWidth = stroke,
                     )
                     x += pitch
@@ -105,7 +131,7 @@ fun UsageBar(
             clipPath(rounded) {
                 drawRoundRect(
                     color = fillColor.copy(alpha = alpha),
-                    size = Size(size.width * fraction, size.height),
+                    size = Size(size.width * fraction, trackHeight),
                     cornerRadius = radius,
                 )
             }
@@ -118,8 +144,20 @@ fun UsageBar(
         drawRect(
             color = notchColor,
             topLeft = Offset(notchX - notchWidth / 2f, 0f),
-            size = Size(notchWidth, size.height),
+            size = Size(notchWidth, trackHeight),
         )
+
+        // Under the track, never cut into it: the notch is the user's own
+        // warning line and must stay the only thing that interrupts the bar.
+        // Fill past this mark means spending faster than an even pace.
+        paceFraction?.let {
+            val x = size.width * it.coerceIn(0.0, 1.0).toFloat()
+            drawRect(
+                color = paceColor.copy(alpha = alpha),
+                topLeft = Offset(x - notchWidth / 2f, trackHeight + PACE_GAP.toPx()),
+                size = Size(notchWidth, PACE_HEIGHT.toPx()),
+            )
+        }
     }
 }
 
@@ -128,4 +166,6 @@ private val COMPACT_HEIGHT = 8.dp
 private val NOTCH_WIDTH = 2.dp
 private val HATCH_STROKE = 2.dp
 private val HATCH_PITCH = 8.dp
+private val PACE_GAP = 3.dp
+private val PACE_HEIGHT = 3.dp
 const val DIMMED_ALPHA = 0.38f
