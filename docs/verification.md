@@ -252,11 +252,49 @@ Validate as the service user, or expect to clean up after it.
 
 ## Still not covered
 
-- **The reset alarm has still never been seen firing.** Unchanged across all
-  three runs, and now the only headline feature without an end-to-end
-  observation. It needs five hours of elapsed time with the app installed
-  against the live relay, which it now has.
+- **A late reset, notified.** The rule that reports a rollover the phone slept
+  through is covered by unit tests only. Observing it needs a cycle more than
+  five hours after a window ended, which cannot be staged without moving the
+  device's clock.
 - **A real at-the-wall response.** Unchanged.
 - **The `/usage` panel comparison.** Unchanged.
 - **A restart of the relay host.** The unit is enabled and `Restart=always`,
   and the reading is persisted, but neither has been through a reboot.
+
+## The reset notification, observed at last (2026-09-09)
+
+Four defects stood between a window rolling over and the phone saying so. The
+first made the other three invisible.
+
+**POST_NOTIFICATIONS was never requested.** Declared in the manifest, never
+asked for, and `NotificationManagerCompat` drops a post from an app without it
+rather than throwing. On the device: `granted=false` with no `USER_SET` flag —
+the marker Android sets when a person answers the dialog. CAMERA carried it,
+notifications did not. Every notification this app ever posted was discarded by
+the system, which is why three verification runs recorded triggers "firing"
+while nothing arrived: the check read a count of decided events from a file,
+never the notification shade.
+
+**What the device showed after the fix**, in order:
+
+| Step | Evidence |
+| --- | --- |
+| The permission is requested | Dialog shown on launch; `granted=true, flags=[USER_SET…]` |
+| Notifications arrive | "Current session limit reached" and "Current session at 100%" posted |
+| The alarm fires on time | Dispatched 22:27:00.000, `window=0` |
+| The receiver does the work | 786ms over 3 wakeups, up from 399ms over 2; `dumpsys jobscheduler` shows no worker ran then |
+| The reset notification is right | "Current session reset — Your current session limit has reset — you have capacity again. Week at 18%.", `seen=true` |
+
+**The timed test failed first, informatively.** A reading was pushed with the
+window ending two minutes out; by the time the alarm fired, the machine's own
+status line had pushed a live reading over it, and the app correctly said
+nothing. That is the architecture's real constraint, reproduced by accident: a
+reset is only observable as a reading whose window has ended, and a machine
+that keeps pushing erases the evidence before the phone looks. The rerun pushed
+an already-ended window and polled immediately.
+
+**Two findings that were not the bug.** Exact alarms were never granted, so
+alarms took the `setAndAllowWhileIdle` path — `flags=0x20, window=+1h0m0s`,
+meaning a reset alarm could land an hour late. And the notification log pruned
+each reset key in the same cycle that recorded it, so the same reset notified
+again every twenty minutes for up to five hours.
