@@ -139,10 +139,21 @@ fn main() {
 fn dispatch() -> i32 {
     match Cli::parse().command {
         Commands::Push { relay, secret, secret_file, log, once, deliver } => {
-            let config = match (relay, read_secret(secret, secret_file)) {
+            let secret = match read_secret(secret, secret_file) {
+                Ok(secret) => secret,
+                // A broken key file must not put an error on every prompt;
+                // `--once` is the setup check, so that is where it is said.
+                Err(error) => {
+                    if once {
+                        eprintln!("headroom: {error}");
+                    }
+                    None
+                }
+            };
+            let config = match (relay, secret) {
                 (Some(relay), Some(secret)) => Some(push::Config { relay, secret, log }),
-                // Not configured yet. The status line still has to work, so
-                // this is silent rather than an error on every prompt.
+                // Not configured yet, or a key file already complained about
+                // above. Either way the status line still has to work.
                 _ => None,
             };
             match (deliver, config) {
@@ -173,9 +184,18 @@ fn dispatch() -> i32 {
                     Err(error) => fail(&error),
                 };
             }
-            let shared = read_secret(secret, secret_file);
-            let write = read_secret(None, push_secret_file).or_else(|| shared.clone());
-            let read = read_secret(None, read_secret_file).or_else(|| shared.clone());
+            let (shared, write, read) = match (
+                read_secret(secret, secret_file),
+                read_secret(None, push_secret_file),
+                read_secret(None, read_secret_file),
+            ) {
+                (Ok(shared), Ok(write), Ok(read)) => (shared, write, read),
+                (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => {
+                    return fail(&error);
+                }
+            };
+            let write = write.or_else(|| shared.clone());
+            let read = read.or_else(|| shared.clone());
             let (Some(write), Some(read)) = (write, read) else {
                 return fail(
                     "no shared secret: set HEADROOM_RELAY_SECRET, or pass --secret-file, \
@@ -213,7 +233,11 @@ fn dispatch() -> i32 {
         }
 
         Commands::Link { relay, secret, secret_file, text } => {
-            let Some(secret) = read_secret(secret, secret_file) else {
+            let secret = match read_secret(secret, secret_file) {
+                Ok(secret) => secret,
+                Err(error) => return fail(&error),
+            };
+            let Some(secret) = secret else {
                 return fail("no shared secret: set HEADROOM_RELAY_SECRET or pass --secret-file.");
             };
             match link::run(&relay, &secret, text) {
@@ -226,14 +250,22 @@ fn dispatch() -> i32 {
 
 /// A file wins over the flag: passing a secret on a command line puts it in
 /// your shell history and in every `ps` listing on the machine.
-fn read_secret(inline: Option<String>, file: Option<PathBuf>) -> Option<String> {
-    if let Some(path) = file {
-        return std::fs::read_to_string(path)
-            .ok()
-            .map(|raw| raw.trim().to_string())
-            .filter(|secret| !secret.is_empty());
+///
+/// `Ok(None)` is nothing supplied. A named file that yields no secret is an
+/// error rather than an absence: calling it an absence sends the operator
+/// looking for a flag they already passed, and the ordinary way to get here
+/// is a mode-0600 key file read by the container's uid.
+fn read_secret(inline: Option<String>, file: Option<PathBuf>) -> Result<Option<String>, String> {
+    let Some(path) = file else {
+        return Ok(inline.filter(|secret| !secret.is_empty()));
+    };
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let secret = raw.trim().to_string();
+    if secret.is_empty() {
+        return Err(format!("{} is empty", path.display()));
     }
-    inline.filter(|secret| !secret.is_empty())
+    Ok(Some(secret))
 }
 
 fn default_relay_state() -> PathBuf {
@@ -244,4 +276,66 @@ fn default_relay_state() -> PathBuf {
 fn fail(message: &str) -> i32 {
     eprintln!("headroom: {message}");
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "headroom-secret-{}-{:?}-{name}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::remove_file(&path).ok();
+        path
+    }
+
+    #[test]
+    fn a_readable_file_yields_its_secret() {
+        let path = temp("ok");
+        std::fs::write(&path, "  s3cret\n").unwrap();
+        assert_eq!(read_secret(None, Some(path.clone())).unwrap(), Some("s3cret".to_string()));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn no_file_and_no_flag_is_simply_absent() {
+        assert_eq!(read_secret(None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn an_unreadable_file_is_an_error_not_an_absence() {
+        let path = temp("denied");
+        std::fs::write(&path, "s3cret").unwrap();
+        let mut mode = std::fs::metadata(&path).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o000);
+        std::fs::set_permissions(&path, mode).unwrap();
+        if std::fs::read_to_string(&path).is_ok() {
+            // Root ignores the mode bits, so there is no denial to observe.
+            std::fs::remove_file(&path).ok();
+            return;
+        }
+
+        let error = read_secret(None, Some(path.clone())).unwrap_err();
+        assert!(error.contains("could not read"), "unhelpful: {error}");
+        assert!(error.contains(path.to_str().unwrap()), "the path is missing: {error}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_file_that_is_not_there_is_an_error_too() {
+        let error = read_secret(None, Some(temp("absent"))).unwrap_err();
+        assert!(error.contains("could not read"), "unhelpful: {error}");
+    }
+
+    #[test]
+    fn an_empty_file_is_an_error_rather_than_a_silent_absence() {
+        let path = temp("empty");
+        std::fs::write(&path, "   \n").unwrap();
+        let error = read_secret(None, Some(path.clone())).unwrap_err();
+        assert!(error.contains("empty"), "unhelpful: {error}");
+        std::fs::remove_file(&path).ok();
+    }
 }
