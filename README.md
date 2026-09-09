@@ -156,10 +156,8 @@ The `chown` above matters for the same reason: the container runs as uid
 65534, and the keys directory is a bind mount, which the image's own
 `--chown` (that gives `/data` to uid 65534) does not reach. If you `chmod 600`
 those key files as [the relay setup below](#1-the-relay) recommends, a
-root-owned, mode-0600 key is unreadable to uid 65534 — and the binary then
-reports no shared secret was configured, even though you passed both key
-flags, because it cannot tell "you gave me nothing" from "I was refused
-permission to read what you gave me."
+root-owned, mode-0600 key is unreadable to uid 65534, and the relay refuses to
+start with `could not read /keys/push-key: Permission denied`.
 
 > Downloading through a browser rather than `curl` puts macOS's quarantine flag
 > on the file, and Gatekeeper will refuse to run it. `xattr -d
