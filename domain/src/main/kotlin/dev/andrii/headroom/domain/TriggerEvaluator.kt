@@ -8,18 +8,24 @@ package dev.andrii.headroom.domain
  */
 class TriggerEvaluator {
 
+    /**
+     * [lastCycleAt] is when this app last completed a cycle, or null if it
+     * never has. It is what separates a window that turned over while the
+     * phone was watching from one that was already over when it first looked.
+     */
     fun evaluate(
         previous: UsageSnapshot?,
         current: UsageSnapshot,
         settings: TriggerSettings,
         alreadyFired: Set<EventKey>,
         nowEpochSeconds: Long,
+        lastCycleAt: Long?,
     ): List<NotificationEvent> {
         val events = mutableListOf<NotificationEvent>()
         for (bucket in current.buckets) {
             if (bucket.kind == BucketKind.UNKNOWN) continue
             val before = previous?.buckets?.firstOrNull { it.identity == bucket.identity }
-            resetEvent(bucket, current, settings, nowEpochSeconds)?.let(events::add)
+            resetEvent(bucket, current, settings, nowEpochSeconds, lastCycleAt)?.let(events::add)
             thresholdEvent(bucket, before, settings)?.let(events::add)
             wallEvent(bucket, before, settings)?.let(events::add)
         }
@@ -31,6 +37,7 @@ class TriggerEvaluator {
         current: UsageSnapshot,
         settings: TriggerSettings,
         now: Long,
+        lastCycleAt: Long?,
     ): NotificationEvent? {
         val type = when (bucket.kind) {
             BucketKind.SESSION -> TriggerType.SESSION_RESET
@@ -41,9 +48,13 @@ class TriggerEvaluator {
         else settings.weeklyReset
         if (!enabled) return null
         if (now < bucket.resetsAt) return null
-        // Spec §7: a reset far in the past means stale data or clock skew, not
-        // an event worth waking someone for.
-        if (now - bucket.resetsAt > windowLength(bucket.kind)) return null
+        // A stale reading is trusted here rather than doubted: nobody is
+        // pushing because the machine that reports is off, so waiting cannot
+        // improve it, and a phone asleep until morning is the ordinary case.
+        // Without an earlier cycle to place the rollover against, though, an
+        // old reading is only an old reading: one window, then silence.
+        val watched = lastCycleAt != null && bucket.resetsAt >= lastCycleAt
+        if (!watched && now - bucket.resetsAt > windowLength(bucket.kind)) return null
         return NotificationEvent(
             key = EventKey(bucket.identity, bucket.resetsAt, type),
             title = "${bucket.title} reset",
@@ -128,12 +139,17 @@ class TriggerEvaluator {
 
     private fun windowLength(kind: BucketKind): Long = when (kind) {
         BucketKind.SESSION -> FIVE_HOURS
-        else -> SEVEN_DAYS
+        else -> LONGEST_WINDOW
     }
 
-    private companion object {
-        const val FIVE_HOURS = 18_000L
-        const val SEVEN_DAYS = 604_800L
-        const val FULLY_USED = 100.0
+    companion object {
+        /**
+         * The longest a reset can still be notified for without having been
+         * watched. The notification log has to outlast it, or a key it prunes
+         * lets the same reset fire again.
+         */
+        const val LONGEST_WINDOW = 604_800L
+        private const val FIVE_HOURS = 18_000L
+        private const val FULLY_USED = 100.0
     }
 }

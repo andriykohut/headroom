@@ -63,6 +63,26 @@ class NotificationCoordinatorTest {
     ) to Triple(notifier, alarms, cache)
 
     @Test
+    fun `a reset is notified once, not again on the next cycle`() = runTest {
+        val notifier = RecordingNotifier()
+        var clock = 5_060L
+        val subject = NotificationCoordinator(
+            fetch = { snapshot(bucket(BucketKind.SESSION, resetsAt = 5_000)) },
+            evaluator = TriggerEvaluator(),
+            log = InMemoryNotificationLog(),
+            notifier = notifier,
+            alarmScheduler = RecordingAlarmScheduler(),
+            settings = { TriggerSettings() },
+            cache = InMemorySnapshotCache(),
+            now = { clock },
+        )
+        subject.runCycle()
+        clock += 1_200
+        subject.runCycle()
+        assertEquals(listOf(TriggerType.SESSION_RESET), notifier.events.map { it.key.type })
+    }
+
+    @Test
     fun `a crossed threshold is notified`() = runTest {
         val (subject, deps) = coordinator({ snapshot(bucket(BucketKind.SESSION, 95.0)) })
         subject.runCycle()

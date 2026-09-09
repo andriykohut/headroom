@@ -10,17 +10,23 @@ import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.andrii.headroom.notify.NotificationCoordinator
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
 /**
- * Runs one coordinator cycle. Used both for the 20-minute periodic poll and
- * for the one-shot runs triggered by a reset alarm or by boot (spec §6).
+ * Runs one coordinator cycle: the 20-minute periodic poll, and the one-shot
+ * runs from boot or from a reset alarm whose own attempt failed (spec §6).
  */
 class PollWorker(
     context: Context,
@@ -59,21 +65,53 @@ class PollWorker(
             )
         }
 
+        /**
+         * Expedited, because both callers are late already: an alarm whose own
+         * attempt failed, and a boot that has no alarm scheduled until this
+         * runs.
+         */
         fun enqueueOnce(context: Context) {
             WorkManager.getInstance(context).enqueue(
-                OneTimeWorkRequestBuilder<PollWorker>().build(),
+                OneTimeWorkRequestBuilder<PollWorker>()
+                    .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                    .build(),
             )
         }
     }
 }
 
 /**
- * Fired at a window's reset. Hands off to the worker immediately: a receiver
- * has a few seconds of runtime, and a network fetch does not fit in it.
+ * Fired at a window's reset, and runs the cycle itself.
+ *
+ * Not handed to WorkManager, tempting as that looks: the alarm allowlists the
+ * app for a few seconds, but a job enqueued from inside Doze is precisely what
+ * Doze defers, and a reset deferred to the next unlock is a reset nobody was
+ * told about. `goAsync` keeps those seconds, which one relay request fits
+ * inside; the worker is the fallback for when it does not.
  */
-class AlarmReceiver : BroadcastReceiver() {
+class AlarmReceiver : BroadcastReceiver(), KoinComponent {
+
+    private val coordinator: NotificationCoordinator by inject()
+
     override fun onReceive(context: Context, intent: Intent) {
-        PollWorker.enqueueOnce(context)
+        val pending = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                withTimeout(RECEIVER_BUDGET_MILLIS) { coordinator.runCycle() }
+            } catch (_: Exception) {
+                PollWorker.enqueueOnce(context)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
+    private companion object {
+        /**
+         * Under the ~10 seconds a broadcast is allowed, with room for the
+         * fallback to be enqueued before the system stops waiting.
+         */
+        const val RECEIVER_BUDGET_MILLIS = 8_000L
     }
 }
 

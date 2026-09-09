@@ -3,20 +3,30 @@ package dev.andrii.headroom.notify
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import dev.andrii.headroom.domain.EventKey
 import dev.andrii.headroom.domain.TriggerType
 import kotlinx.coroutines.flow.first
 
 /**
- * Remembers which notifications have already fired, so the rules stay
- * idempotent across overlapping polls, process death and reboots (spec §5).
+ * What the notification rules remember between cycles, so they stay idempotent
+ * across overlapping polls, process death and reboots (spec §5).
  */
 interface NotificationLog {
     suspend fun fired(): Set<EventKey>
     suspend fun record(keys: Collection<EventKey>)
-    /** Forget keys for windows that have passed, so the set cannot grow forever. */
+    /** Forget keys old enough that no rule can produce them again. */
     suspend fun prune(beforeResetsAt: Long)
+
+    /**
+     * When a cycle last completed, or null if none ever has.
+     *
+     * Null is a fresh install, and the reset rule reads it as such: with
+     * nothing to place a rollover against, it announces none.
+     */
+    suspend fun lastCycleAt(): Long?
+    suspend fun recordCycle(atEpochSeconds: Long)
 }
 
 /**
@@ -59,7 +69,14 @@ class DataStoreNotificationLog(
         }
     }
 
+    override suspend fun lastCycleAt(): Long? = dataStore.data.first()[CYCLE_KEY]
+
+    override suspend fun recordCycle(atEpochSeconds: Long) {
+        dataStore.edit { prefs -> prefs[CYCLE_KEY] = atEpochSeconds }
+    }
+
     private companion object {
         val KEY = stringSetPreferencesKey("fired_event_keys")
+        val CYCLE_KEY = longPreferencesKey("last_cycle_at")
     }
 }

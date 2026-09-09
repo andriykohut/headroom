@@ -11,11 +11,14 @@ import kotlin.test.assertTrue
 
 class InMemoryNotificationLog : NotificationLog {
     private val keys = mutableSetOf<EventKey>()
+    private var cycleAt: Long? = null
     override suspend fun fired(): Set<EventKey> = keys.toSet()
     override suspend fun record(keys: Collection<EventKey>) { this.keys += keys }
     override suspend fun prune(beforeResetsAt: Long) {
         keys.removeAll { it.resetsAt < beforeResetsAt }
     }
+    override suspend fun lastCycleAt(): Long? = cycleAt
+    override suspend fun recordCycle(atEpochSeconds: Long) { cycleAt = atEpochSeconds }
 }
 
 class NotificationLogTest {

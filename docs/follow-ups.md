@@ -9,26 +9,20 @@ credential-on-phone to push-and-relay.
 
 ## Not yet observed
 
-### The reset alarm has never fired in anger
+### Exact alarms are not granted, and nothing asks for them
 
-`ResetAlarmScheduler` picks the earliest future reset, `AlarmReceiver` enqueues
-a poll, and the coordinator notifies. Every link in that chain is tested, and
-the alarm is verified as *scheduled* — in both the exact and the degraded path —
-but no session window has actually elapsed with the app installed, so nobody
-has seen the notification arrive at the moment it should.
+`SCHEDULE_EXACT_ALARM` is declared and denied by default, so `schedule` takes
+the `setAndAllowWhileIdle` path: on a real device that reads as
+`flags=0x20, window=+1h0m0s`, meaning a reset alarm may land up to an hour
+after the window turned over. The degraded path is deliberate — dropping reset
+notifications entirely would be worse — and it is now survivable, because a
+late cycle still reports a rollover it was watching for. But an hour late on
+the headline feature is not what the screen promises.
 
-**How to settle it:** leave the app installed and note whether a
-"Current session reset" notification arrives at the time the app showed. Takes
-up to five hours.
-
-**Why it is worth doing:** this is the app's headline feature. Everything else
-degrades gracefully; a reset notification that never arrives is the product not
-working.
-
-**Newly relevant:** the relay only receives readings while you are working, so a
-window that resets overnight is now first observed by whichever fires first —
-the alarm, or the next morning's push. The alarm path matters *more* under this
-architecture, not less.
+**How to settle it:** decide between asking the user to grant "Alarms &
+reminders", and accepting lateness now that lateness no longer means silence.
+`USE_EXACT_ALARM` is not an option; it is restricted to alarm clocks and
+calendars, which this is not.
 
 ### No response from an account actually at its limit
 
