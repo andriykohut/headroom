@@ -22,7 +22,7 @@ last reading. Your phone reads it from there.
 
 <div align="center">
 
-<img src="docs/screenshots/usage.png" width="30%" alt="Session at 23%, week at 12%, a per-model window at 7%">
+<img src="docs/screenshots/usage.png" width="30%" alt="Session at 23%, week at 12%, with a pace mark under the weekly bar">
 <img src="docs/screenshots/approaching.png" width="30%" alt="Session at 94%, past the warning notch, marked Near limit">
 <img src="docs/screenshots/wall.png" width="30%" alt="Session at 100%, track hatched edge to edge, Limit reached">
 
