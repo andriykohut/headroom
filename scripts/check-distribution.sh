@@ -52,17 +52,17 @@ else
     fail "the golden payload fixtures have drifted; the app can no longer read what the CLI writes"
 fi
 
-# The usage endpoint returns roughly twenty keys, including unreleased product
-# codenames and a spend object. Only `limits` is drawn, and only `limits` has
-# any business being copied onto a relay or cached on a phone. The trim is one
-# deleted line away from silently un-happening, so it is checked.
-printf 'Checking the pusher still sends only what is drawn... '
-if grep -q 'fn trim(' cli/src/push.rs \
-   && grep -q 'response.get("limits")' cli/src/push.rs \
-   && grep -q 'enrichment_leaves_spending_and_codenames_behind' cli/src/push.rs; then
-    printf 'trimmed\n'
+# Subscription OAuth is for Claude Code and Anthropic's own apps; a third-party
+# tool reading that token and calling the usage endpoint is not permitted, and
+# it was removed for that reason. It is a handful of lines to add back.
+printf 'Checking the pusher contacts nobody but your relay... '
+# example.test is excluded: RFC 2606 reserves it, and the golden pairing
+# fixture must keep the exact bytes an older release encoded.
+if grep -rniE 'api/oauth|Claude Code-credentials|find-generic-password|anthropic\.com' cli/src/ \
+     | grep -qv 'example\.test'; then
+    fail "cli/src/ reaches for a provider credential or endpoint again"
 else
-    fail "cli/src/push.rs no longer trims the usage response to its limits array"
+    printf 'clean\n'
 fi
 
 # A relay is reached over HTTPS because the phone sends its shared secret on

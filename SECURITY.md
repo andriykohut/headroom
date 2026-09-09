@@ -7,11 +7,10 @@ explicit about which holds what:
 | --- | --- | --- |
 | The **app**, on your phone | Your relay's address and its **read** key | Someone reads your quota usage |
 | The **relay**, on a machine you run | The last usage reading | The same, plus whatever the host itself is worth |
-| The **CLI**, on the machine you code on | Nothing durable; it *reads* Claude Code's access token to make one request | Your Claude credential leaks |
+| The **CLI**, on the machine you code on | Nothing; it forwards what Claude Code hands it | Your relay's write key leaks |
 
-Only the third is account-critical, and it is the one that runs on a machine
-where that credential already lives. The phone deliberately holds nothing that
-can act as you.
+None of the three is account-critical: no part of Headroom holds, reads or
+transmits a credential that can act as you with the provider.
 
 ## Reporting a vulnerability
 
@@ -27,20 +26,12 @@ fix before any public disclosure — please give it that time.
 
 ## What counts
 
-**Anything that lets Claude Code's access token escape the machine it lives
-on.** This is the sharpest edge in the project:
-
-- `headroom push` sending that token anywhere other than the usage endpoint it
-  read out of the local Claude Code install — including to the relay, which
-  must never see it.
-- The token reaching a log, an error message, a process listing, or the state
-  file in `~/.local/state/headroom/`.
-- `headroom push` *writing* to Claude Code's credential store, or attempting a
-  token refresh. It does neither by design; doing either could invalidate the
-  user's login.
-- The enrichment response reaching the relay untrimmed. Only the `limits` array
-  may travel — see `trim()` in `cli/src/push.rs`, and the check in
-  `scripts/check-distribution.sh` that fails the build if it disappears.
+**Anything that makes the CLI read a provider credential or call the provider.**
+It does neither, and that is a property worth defending rather than an accident:
+subscription OAuth is reserved for Claude Code and Anthropic's own applications,
+so a Headroom that reached for that token would be both a security problem and a
+terms problem. `scripts/check-distribution.sh` fails the build on any reference
+to the credential store or the usage endpoint.
 
 **Anything that lets the relay's shared secret escape**, or be bypassed:
 

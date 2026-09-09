@@ -14,7 +14,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 const PAYLOAD: &str = r#"{"model":{"display_name":"Fable"},"rate_limits":{"five_hour":{"used_percentage":41.6,"resets_at":1788000000},"seven_day":{"used_percentage":12.0,"resets_at":1788400000}}}"#;
 
@@ -27,13 +27,6 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::remove_dir_all(&path).ok();
     std::fs::create_dir_all(&path).unwrap();
     path
-}
-
-/// Pre-date the enrichment clock so the cheap path is what gets measured. The
-/// full fetch is on its own timer and is not what runs on a typical message.
-fn skip_enrichment(state: &Path) {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    std::fs::write(state.join("push.json"), format!(r#"{{"enriched_at":{now}}}"#)).unwrap();
 }
 
 fn run_push(relay: &str, state: &Path) -> (Duration, String) {
@@ -66,7 +59,6 @@ fn a_relay_that_never_answers_does_not_delay_the_prompt() {
     });
 
     let state = scratch("blackhole");
-    skip_enrichment(&state);
     let (elapsed, stdout) = run_push(&format!("http://127.0.0.1:{port}"), &state);
 
     assert!(
@@ -81,7 +73,6 @@ fn an_unroutable_relay_does_not_delay_the_prompt() {
     // Nothing listening at all: a connection refused, or on some networks a
     // long SYN timeout. Either way the prompt must not notice.
     let state = scratch("unroutable");
-    skip_enrichment(&state);
     let (elapsed, stdout) = run_push("http://127.0.0.1:9", &state);
     assert!(elapsed < MUST_RETURN_WITHIN, "push took {elapsed:?}");
     assert_eq!(stdout, PAYLOAD);
@@ -141,7 +132,6 @@ fn the_reading_does_arrive_even_though_the_prompt_did_not_wait() {
     });
 
     let state = scratch("delivery");
-    skip_enrichment(&state);
     let (elapsed, _) = run_push(&format!("http://127.0.0.1:{port}"), &state);
     assert!(elapsed < MUST_RETURN_WITHIN, "push took {elapsed:?}");
 

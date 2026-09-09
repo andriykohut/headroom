@@ -39,13 +39,6 @@ fn scratch(name: &str) -> PathBuf {
     path
 }
 
-/// Pre-date the enrichment clock: these tests are about the lock, and a fetch
-/// would reach for a real credential and a real endpoint.
-fn skip_enrichment(state: &Path) {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    std::fs::write(state.join("push.json"), format!(r#"{{"enriched_at":{now}}}"#)).unwrap();
-}
-
 /// One session's status line: feed it the payload and wait for it to return.
 /// The detached child it spawns outlives it, which is the point.
 fn push(relay: &str, state: &Path) {
@@ -79,7 +72,6 @@ fn sessions_pushing_at_the_same_moment_make_one_request_between_them() {
     });
 
     let state = scratch("overlap");
-    skip_enrichment(&state);
     let relay = format!("http://127.0.0.1:{port}");
     for _ in 0..5 {
         push(&relay, &state);
@@ -110,7 +102,6 @@ fn a_lock_left_behind_by_a_killed_child_does_not_silence_the_next_push() {
     });
 
     let state = scratch("orphaned");
-    skip_enrichment(&state);
     std::fs::write(state.join("push.lock"), b"").unwrap();
 
     push(&format!("http://127.0.0.1:{port}"), &state);
@@ -137,7 +128,6 @@ fn a_push_stamps_the_moment_the_machine_observed_the_reading() {
     });
 
     let state = scratch("observed");
-    skip_enrichment(&state);
     let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     push(&format!("http://127.0.0.1:{port}"), &state);

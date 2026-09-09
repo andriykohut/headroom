@@ -76,35 +76,17 @@ have used.
 
 ## The CLI on the machine you code on
 
-`headroom push` runs as a Claude Code status line hook. It does two things:
+`headroom push` runs as a Claude Code status line hook and does one thing: it
+reads the usage figures **already present** in the payload Claude Code hands its
+status line, and forwards them to your relay. No request is made to anyone but
+your relay; the numbers arrived on a response you had already paid for.
 
-- Reads the usage figures **already present** in the payload Claude Code hands
-  its status line, and forwards them to your relay. No request is made; the
-  numbers arrived on a response you had already paid for.
-- At most once every five minutes, and only when the status line runs — that
-  is, only while you are working — reads the access token Claude Code stores on
-  that machine and fetches the fuller picture, which adds the per-model weekly
-  windows.
-
-It **never writes** to Claude Code's credential store and never refreshes a
-token, so it cannot invalidate your login. The token it reads goes to exactly
-one place: the endpoint Claude Code itself calls.
-
-The full response to that fetch carries about twenty keys, including product
-codenames and a `spend` object. Only the `limits` array is forwarded; the rest
-is discarded on the machine it came from and never reaches your relay or your
-phone. `scripts/check-distribution.sh` fails the build if that stops being
-true.
+It never reads, writes or touches Claude Code's credential store, and it never
+contacts the provider. `scripts/check-distribution.sh` fails the build if that
+stops being true.
 
 `headroom link` renders your relay's address and secret as a QR code in your
 terminal. It writes nothing to disk and contacts no server.
-
-## Your account with the provider
-
-The enrichment fetch calls an endpoint that is not publicly documented. The
-provider's terms may not permit that; the README says so plainly, along with
-why it is a narrower question than it was. That is between you and them, and
-this document does not change it.
 
 ## Changes and contact
 

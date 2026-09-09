@@ -6,6 +6,15 @@ implemented. `docs/follow-ups.md`, `docs/discovery-notes.md` and
 `docs/verification.md` are the facts this builds on; this file adds the facts
 found today and draws the conclusion.
 
+> **Superseded in part, 2026-09-08.** The push-and-relay shape recommended here
+> was built and shipped. The per-model weekly windows it discusses were not
+> kept: reaching them meant reading Claude Code's access token and calling an
+> undocumented endpoint, and Anthropic's Claude Code terms reserve subscription
+> OAuth for Claude Code and its own applications and forbid developers
+> collecting or intermediating those credentials. That half was removed, so
+> every mention of per-model data below describes an option that was considered
+> and is no longer available.
+
 ## The short version
 
 **The pull design should be abandoned, and not only because of the token

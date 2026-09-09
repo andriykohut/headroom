@@ -13,7 +13,7 @@
 ---
 
 Headroom renders the same bars as Claude Code's `/usage` — current session,
-current week, and each per-model weekly window — and notifies you on four
+current week — and notifies you on four
 events: session reset, weekly reset, an approaching-limit line you choose, and
 hitting the wall.
 
@@ -67,10 +67,9 @@ payload that already contains your five-hour and seven-day usage. Reporting
 those costs nothing at all — the numbers arrived on a response you had already
 paid for. That is the bulk of what you see, and it updates as you type.
 
-Every five minutes, and only while you are actually working, `headroom push`
-also fetches the full picture, which adds the **per-model weekly windows** that
-the status line does not carry. That is one request per five minutes of active
-coding, and none at all overnight.
+That payload is the whole of it. Headroom never contacts Anthropic — not to
+poll, not to enrich, not once. `scripts/check-distribution.sh` fails the build
+if that stops being true.
 
 The relay is a store-and-forward box and nothing else. It holds no credential,
 never contacts Anthropic, and knows three percentages and three reset times. The
@@ -304,24 +303,20 @@ architecturally a generic usage meter pointed at a URL you give it.
 
 Two things you should know before using it, stated plainly:
 
-- **The status line half costs no requests.** Claude Code computes your usage
-  and hands it to your own status line command; Headroom reads what is already
-  there. Nothing is polled, nothing extra is asked for, and this is a
-  documented Claude Code feature working as intended.
+**Headroom costs no requests and never calls Anthropic.** Claude Code computes
+your usage and hands it to your own status line command; Headroom reads what is
+already there and forwards it to a relay you host. Nothing is polled, nothing
+extra is asked for, and this is a documented Claude Code feature working as
+intended.
 
-- **The enrichment half calls an undocumented endpoint.** Anthropic's Consumer
-  Terms (§3) prohibit accessing the Services *"through automated or non-human
-  means"* except via an API key or where explicitly permitted, and a scripted
-  fetch is automated access on a plain reading. What makes this a narrower
-  question than it was: it runs on the machine where Claude Code is installed
-  and logged in, only while you are actively using Claude Code, at most once
-  every five minutes — a small fraction of the requests your own session is
-  already making. Nothing runs when you are not working. The risk is to your
-  account, and the choice is yours; `--interval 0` is not a thing you can set,
-  and the floor is 60 seconds for the same reason.
-
-  If you would rather not make that call at all, leave it: without enrichment
-  you still get the session and weekly bars, and lose only the per-model ones.
+Earlier versions did more: they read the access token Claude Code stores and
+fetched an undocumented endpoint to add per-model weekly windows. That is not
+permitted. Anthropic's Claude Code terms reserve subscription OAuth for Claude
+Code and Anthropic's own applications, direct developers to API keys instead,
+and say plainly that developers *"may not collect, store, or intermediate
+Claude.ai credentials or session tokens"*. So it was removed, and the per-model
+bars went with it — there is no supported source for them. `/usage` in Claude
+Code is where to see those.
 
 Nothing leaves your phone except requests to your own relay. No analytics, no
 crash reporting, no third-party service. See [`PRIVACY.md`](PRIVACY.md).
