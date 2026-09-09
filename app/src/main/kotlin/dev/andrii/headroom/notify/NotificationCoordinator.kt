@@ -68,8 +68,7 @@ class NotificationCoordinator(
         val next = nextAlarmAt(current, currentSettings, now())
         if (next != null) alarmScheduler.schedule(next) else alarmScheduler.cancel()
 
-        // Keys for windows now past can never fire again.
-        log.prune(beforeResetsAt = now())
+        log.prune(beforeResetsAt = now() - TriggerEvaluator.LONGEST_WINDOW)
 
         return CycleResult(events, needsNewCode = false, nextAlarmAt = next)
     }

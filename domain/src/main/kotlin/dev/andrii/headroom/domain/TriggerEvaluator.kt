@@ -128,12 +128,16 @@ class TriggerEvaluator {
 
     private fun windowLength(kind: BucketKind): Long = when (kind) {
         BucketKind.SESSION -> FIVE_HOURS
-        else -> SEVEN_DAYS
+        else -> LONGEST_WINDOW
     }
 
-    private companion object {
-        const val FIVE_HOURS = 18_000L
-        const val SEVEN_DAYS = 604_800L
-        const val FULLY_USED = 100.0
+    companion object {
+        /**
+         * The longest a reset can still be notified for. The notification log
+         * has to outlast it, or a key it prunes lets the same reset fire again.
+         */
+        const val LONGEST_WINDOW = 604_800L
+        private const val FIVE_HOURS = 18_000L
+        private const val FULLY_USED = 100.0
     }
 }
