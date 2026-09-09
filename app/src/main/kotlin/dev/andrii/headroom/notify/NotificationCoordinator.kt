@@ -60,10 +60,14 @@ class NotificationCoordinator(
             settings = currentSettings,
             alreadyFired = log.fired(),
             nowEpochSeconds = now(),
+            lastCycleAt = log.lastCycleAt(),
         )
         events.forEach(notifier::notify)
         log.record(events.map { it.key })
         cache.store(current)
+        // Below the fetch, and it belongs there: a cycle that failed to read
+        // anything must not move the baseline past a rollover nobody saw.
+        log.recordCycle(now())
 
         val next = nextAlarmAt(current, currentSettings, now())
         if (next != null) alarmScheduler.schedule(next) else alarmScheduler.cancel()

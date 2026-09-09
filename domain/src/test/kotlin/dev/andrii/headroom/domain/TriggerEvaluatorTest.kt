@@ -33,7 +33,8 @@ class TriggerEvaluatorTest {
         now: Long,
         fired: Set<EventKey> = emptySet(),
         settings: TriggerSettings = this.settings,
-    ) = evaluator.evaluate(previous, current, settings, fired, now)
+        lastCycleAt: Long? = null,
+    ) = evaluator.evaluate(previous, current, settings, fired, now, lastCycleAt)
 
     // --- reset ---
 
@@ -81,7 +82,7 @@ class TriggerEvaluatorTest {
 
     @Test
     fun `clock skew does not fire a reset for a long past window`() {
-        // Spec §7: never fire for a resetsAt more than one window length in the past.
+        // Spec §7: unwatched, one window length in the past is the limit.
         val current = snapshot(bucket(BucketKind.SESSION, resetsAt = 1_000))
         assertTrue(evaluate(null, current, now = 1_000 + 18_000 + 1).isEmpty())
     }
@@ -96,6 +97,19 @@ class TriggerEvaluatorTest {
     fun `a weekly window gets the weekly tolerance, not the session one`() {
         val current = snapshot(bucket(BucketKind.WEEKLY_ALL, resetsAt = 1_000))
         assertTrue(evaluate(null, current, now = 1_000 + 18_000 + 1).isNotEmpty())
+    }
+
+    @Test
+    fun `a reset the app was watching for fires however late the cycle is`() {
+        val current = snapshot(bucket(BucketKind.SESSION, resetsAt = 2_000))
+        val events = evaluate(null, current, now = 2_000 + 28_800, lastCycleAt = 1_900)
+        assertEquals(listOf(TriggerType.SESSION_RESET), events.map { it.key.type })
+    }
+
+    @Test
+    fun `a window that ended before the app was watching stays quiet`() {
+        val current = snapshot(bucket(BucketKind.SESSION, resetsAt = 2_000))
+        assertTrue(evaluate(null, current, now = 2_000 + 28_800, lastCycleAt = 2_100).isEmpty())
     }
 
     // --- threshold ---
