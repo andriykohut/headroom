@@ -44,7 +44,7 @@ jobs:
       # compares the manifest AT THE TAGGED COMMIT, which is the gate this
       # job exists to run - and it fails loudly if that tag does not exist,
       # which is correct: this input is documented as "Tag to build".
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ steps.resolve.outputs.version }}
       - run: scripts/check-version.sh "${{ steps.resolve.outputs.version }}"
@@ -78,7 +78,7 @@ jobs:
       # "Use workflow from" was run against (typically main), not the tag
       # typed into the input. Without this, a binary built from main could
       # get uploaded as if it were the tagged release.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ needs.version.outputs.version }}
 
@@ -109,7 +109,7 @@ jobs:
           ./headroom-${{ matrix.target }} --version
           ./headroom-${{ matrix.target }} --version | grep -q "${VERSION#v}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}
           path: headroom-${{ matrix.target }}
@@ -120,7 +120,7 @@ jobs:
     needs: binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           merge-multiple: true
@@ -128,7 +128,7 @@ jobs:
       # "<hash>  <basename>" with the basename anchored at end-of-line, and
       # shasum's "SHA256 (name) = hash" format would break every install.
       - run: sha256sum headroom-* | tee SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-binaries
           path: |
@@ -149,11 +149,11 @@ jobs:
     steps:
       # Pinned to the tag; see the `binaries` job for why github.sha alone
       # is not safe under workflow_dispatch.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ needs.version.outputs.version }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: cli-binaries
           path: staged
@@ -168,7 +168,7 @@ jobs:
           # 65534, since scratch has no RUN mkdir to do it inside the image.
           mkdir -p dist/data
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # A broken image must never reach ghcr before something has checked it.
       # Buildx cannot `load` a multi-platform build into the local engine, so
@@ -177,7 +177,7 @@ jobs:
       # persists for the rest of the job, so the real multi-arch build below
       # reuses this one's cached layers rather than starting cold.
       - name: Build a local, single-arch image to smoke test before anything is public
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -229,14 +229,14 @@ jobs:
             echo "TAGS_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push the multi-arch image, now that it has been tested
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -250,7 +250,7 @@ jobs:
     steps:
       # Pinned to the tag; see the `binaries` job for why github.sha alone
       # is not safe under workflow_dispatch.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ needs.version.outputs.version }}
 
@@ -258,17 +258,17 @@ jobs:
       # this artifact is the one strangers install.
       - run: ./scripts/check-distribution.sh
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: Install the compile SDK
         run: sdkmanager --install "platforms;android-37.2" "build-tools;36.0.0"
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
 
       - name: Test
         run: ./gradlew :domain:test :app:testDebugUnitTest
@@ -322,13 +322,13 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: cli-binaries
           path: .
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.artifact.outputs.version }}
           # A dash marks a prerelease (v1.0.0-beta.2, v0.0.1-rc1); a bare
@@ -371,7 +371,7 @@ jobs:
     steps:
       # Pinned to the tag; see the `binaries` job for why github.sha alone
       # is not safe under workflow_dispatch.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ needs.version.outputs.version }}
       - name: Run the installer against the release just published
