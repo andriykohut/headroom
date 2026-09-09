@@ -74,6 +74,7 @@ fun UsageScreen(
 
         TopLine(
             age = snapshot?.let { formatAge(nowEpochSeconds - it.fetchedAt) },
+            lastReported = snapshot?.let { formatLastReported(it.fetchedAt) },
             stale = stale,
             onRefresh = onRefresh,
             onOpenSettings = onOpenSettings,
@@ -115,13 +116,22 @@ private fun UsageState.snapshotOrNull(): UsageSnapshot? = when (this) {
 @Composable
 private fun TopLine(
     age: String?,
+    lastReported: String?,
     stale: Boolean,
     onRefresh: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        // Stale is not a failure: the fetch worked and the machine that reports
+        // is off. Dating the reading says that; ageing it invites a refresh
+        // that cannot help, because only the next push makes a newer one.
+        val text = when {
+            stale && lastReported != null -> "Last reported $lastReported"
+            age != null -> "Updated $age"
+            else -> ""
+        }
         Text(
-            text = age?.let { "Updated $it" }.orEmpty(),
+            text = text,
             style = if (stale) MaterialTheme.typography.titleSmall
             else MaterialTheme.typography.bodyMedium,
             color = if (stale) MaterialTheme.colorScheme.onSurface
@@ -197,7 +207,7 @@ private fun HeroBucket(
     now: Long,
     dimmed: Boolean,
 ) {
-    val state = barState(bucket.utilization, thresholdPercent)
+    val state = barState(bucket.utilization, thresholdPercent, bucket.hasReset(now))
     val alpha = if (dimmed) DIMMED_ALPHA else 1f
 
     Text(
@@ -234,7 +244,14 @@ private fun HeroBucket(
         )
     }
     Spacer(Modifier.height(8.dp))
-    UsageBar(bucket.utilization, thresholdPercent, hero = true, dimmed = dimmed)
+    UsageBar(
+        bucket.utilization,
+        thresholdPercent,
+        hero = true,
+        dimmed = dimmed,
+        hasReset = bucket.hasReset(now),
+        paceFraction = bucket.paceMark(now),
+    )
     Spacer(Modifier.height(8.dp))
     StatusLine(bucket, state, now, alpha, hero = true)
 }
@@ -247,7 +264,7 @@ private fun CompactBucket(
     dimmed: Boolean,
     showResetLine: Boolean,
 ) {
-    val state = barState(bucket.utilization, thresholdPercent)
+    val state = barState(bucket.utilization, thresholdPercent, bucket.hasReset(now))
     val alpha = if (dimmed) DIMMED_ALPHA else 1f
 
     Row(verticalAlignment = Alignment.Bottom) {
@@ -273,7 +290,13 @@ private fun CompactBucket(
         )
     }
     Spacer(Modifier.height(6.dp))
-    UsageBar(bucket.utilization, thresholdPercent, dimmed = dimmed)
+    UsageBar(
+        bucket.utilization,
+        thresholdPercent,
+        dimmed = dimmed,
+        hasReset = bucket.hasReset(now),
+        paceFraction = bucket.paceMark(now),
+    )
     if (showResetLine || state != BarState.FINE) {
         Spacer(Modifier.height(8.dp))
         StatusLine(bucket, state, now, alpha, hero = false)
@@ -294,10 +317,15 @@ private fun StatusLine(
 
     val text = buildAnnotatedString {
         when (state) {
-            BarState.FINE -> append(
-                if (countdown == "now") "Reset. Refresh for the new window."
-                else "Resets in $countdown",
-            )
+            BarState.FINE -> append("Resets in $countdown")
+            BarState.RESET -> {
+                withStyle(SpanStyle(color = accent, fontWeight = FontWeight.SemiBold)) {
+                    append("Reset")
+                }
+                val at = formatResetTime(bucket.resetsAt)
+                append(if (at == null) " · fresh window" else " $at · fresh window")
+                append(", measured again on your next message")
+            }
             BarState.APPROACHING -> {
                 withStyle(SpanStyle(color = accent, fontWeight = FontWeight.SemiBold)) {
                     append("Near limit")
@@ -339,7 +367,7 @@ private fun StatusLine(
 
 @Composable
 private fun statusColor(state: BarState) = when (state) {
-    BarState.FINE -> MaterialTheme.colorScheme.onSurface
+    BarState.FINE, BarState.RESET -> MaterialTheme.colorScheme.onSurface
     BarState.APPROACHING -> MaterialTheme.colorScheme.tertiary
     BarState.WALL -> MaterialTheme.colorScheme.error
 }
@@ -420,3 +448,7 @@ private fun OfflineStrip(message: String, onRefresh: () -> Unit) {
         }
     }
 }
+
+/** Null for a window that has ended: a full bar of elapsed time tells nobody anything. */
+private fun LimitBucket.paceMark(now: Long): Double? =
+    if (hasReset(now)) null else elapsedFraction(now)

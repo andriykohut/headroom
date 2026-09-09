@@ -82,6 +82,11 @@ Rules that keep the palette honest:
 
 ### The three states, without colour
 
+A fourth appearance sits outside this partition. When a window's reset time has
+passed, the reading describes a window that has ended, so the bar empties and
+says so rather than drawing a figure that is no longer true — the one case
+where the honest answer is that there is nothing to measure yet.
+
 Colour is the fastest cue, so it is used, but every state also differs in
 **form**, **weight** and **words**:
 

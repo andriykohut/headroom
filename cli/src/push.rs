@@ -36,6 +36,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct Config {
     pub relay: String,
     pub secret: String,
+    pub log: Option<PathBuf>,
 }
 
 /// The parent: echo, hand off, exit. Never returns an error to the caller,
@@ -79,6 +80,7 @@ pub fn run(config: Option<Config>, foreground: bool) -> i32 {
         .arg(&config.relay)
         .arg("--secret")
         .arg(&config.secret)
+        .args(config.log.iter().flat_map(|path| [std::ffi::OsStr::new("--log"), path.as_os_str()]))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -97,7 +99,12 @@ pub fn deliver_detached(config: &Config, body: &str) -> i32 {
 }
 
 fn deliver(config: &Config, body: &str) -> Result<String, String> {
-    post(&config.relay, &config.secret, body, unix_time())?;
+    let now = unix_time();
+    post(&config.relay, &config.secret, body, now)?;
+    // After the push, so a log the user asked for cannot cost them a reading.
+    if let Some(path) = &config.log {
+        crate::usage_log::append(path, body, now);
+    }
     Ok("pushed the session and weekly windows".into())
 }
 

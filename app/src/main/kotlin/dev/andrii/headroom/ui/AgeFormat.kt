@@ -41,3 +41,21 @@ fun formatResetTime(resetsAtEpochSeconds: Long, zone: ZoneId = ZoneId.systemDefa
     if (resetsAtEpochSeconds <= 0) return null
     return RESET_TIME.format(Instant.ofEpochSecond(resetsAtEpochSeconds).atZone(zone))
 }
+
+/**
+ * "Tue 18:42": when the reporting machine last said anything.
+ *
+ * Shown instead of an age once a reading is stale, because an age reads as a
+ * fault the phone could retry away. Nothing failed - the machine that reports
+ * is off - and a wall-clock time says that where "14 hr ago" does not.
+ *
+ * Null when there is no timestamp, so the caller falls back rather than
+ * printing an instant in 1970.
+ */
+fun formatLastReported(
+    observedAtEpochSeconds: Long,
+    zone: ZoneId = ZoneId.systemDefault(),
+): String? {
+    if (observedAtEpochSeconds <= 0) return null
+    return RESET_TIME.format(Instant.ofEpochSecond(observedAtEpochSeconds).atZone(zone))
+}
