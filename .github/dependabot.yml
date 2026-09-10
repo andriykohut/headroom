@@ -1,0 +1,34 @@
+version: 2
+
+# No docker ecosystem: the Dockerfile is FROM scratch, so there is no base
+# image to track.
+#
+# Majors sit outside every group on purpose. Dependabot raises one PR each for
+# them, so a red run names the upgrade that broke it rather than a batch.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /cli
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ['*']
+        update-types: [minor, patch]

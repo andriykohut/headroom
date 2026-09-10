@@ -32,7 +32,7 @@ jobs:
               ;;
           esac
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Without this, a dispatch from main publishes main's tree under the
           # tag's version number and nothing downstream notices.
