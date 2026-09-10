@@ -268,7 +268,12 @@ jobs:
       - name: Install the compile SDK
         run: sdkmanager --install "platforms;android-37.2" "build-tools;36.0.0"
 
+      # basic, not the default 'enhanced': that one loads gradle-actions-caching,
+      # a closed-source component under Gradle's commercial Terms of Use, onto
+      # the same runner that decodes the signing key below.
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
 
       - name: Test
         run: ./gradlew :domain:test :app:testDebugUnitTest
