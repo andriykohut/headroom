@@ -1,6 +1,6 @@
 [package]
 name = "headroom-cli"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 readme = "README.md"
 keywords = ["claude", "usage", "cli", "android"]
