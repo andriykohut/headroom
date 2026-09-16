@@ -30,13 +30,12 @@ interface NotificationLog {
 }
 
 /**
- * ASCII unit separator. Bucket identities are undocumented server strings and
- * already contain a colon for per-model buckets, so the separator has to be a
- * character no plausible name would carry.
+ * ASCII unit separator. Bucket kinds are server strings, so the separator has
+ * to be a character no plausible name would carry.
  */
 private const val SEPARATOR = "\u001F"
 
-fun EventKey.serialise(): String = listOf(bucketIdentity, resetsAt.toString(), type.name)
+fun EventKey.serialise(): String = listOf(rawKind, resetsAt.toString(), type.name)
     .joinToString(SEPARATOR)
 
 fun parseEventKey(text: String): EventKey? {

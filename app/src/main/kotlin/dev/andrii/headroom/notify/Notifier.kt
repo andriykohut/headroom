@@ -35,8 +35,5 @@ fun channelNameFor(type: TriggerType): String = when (type) {
 /**
  * Stable per window, so a notification for a new window appears alongside
  * rather than replacing the previous one.
- *
- * The key includes the bucket identity, which is what keeps two models'
- * weekly notifications apart when they share a reset time.
  */
 fun notificationIdFor(key: EventKey): Int = key.hashCode()

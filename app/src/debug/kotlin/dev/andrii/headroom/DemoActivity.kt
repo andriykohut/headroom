@@ -89,16 +89,6 @@ class DemoActivity : ComponentActivity() {
                 group = "weekly",
                 severity = "normal",
             ),
-            LimitBucket(
-                kind = BucketKind.WEEKLY_SCOPED,
-                rawKind = "weekly_scoped",
-                title = "Current week (Example Model)",
-                utilization = 7.0,
-                resetsAt = WEEKLY_RESET,
-                group = "weekly",
-                severity = "normal",
-                scopeLabel = "Example Model",
-            ),
         ),
         fetchedAt = fetchedAt,
     )

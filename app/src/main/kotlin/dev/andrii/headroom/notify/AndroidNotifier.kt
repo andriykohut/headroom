@@ -2,6 +2,7 @@ package dev.andrii.headroom.notify
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -32,6 +33,13 @@ class AndroidNotifier(private val context: Context) : Notifier {
         )
     }
 
+    // The launcher's own intent, so a tap resumes the existing task instead of
+    // stacking a second copy of the screen on top of it.
+    private val openApp: PendingIntent? =
+        context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+            PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE)
+        }
+
     override fun notify(event: NotificationEvent) {
         post(
             channelId = channelIdFor(event.key.type),
@@ -58,6 +66,7 @@ class AndroidNotifier(private val context: Context) : Notifier {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(openApp)
             .setAutoCancel(true)
             .build()
         // POST_NOTIFICATIONS may be denied; NotificationManagerCompat drops the

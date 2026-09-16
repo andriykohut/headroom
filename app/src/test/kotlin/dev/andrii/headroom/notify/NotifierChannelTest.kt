@@ -60,16 +60,6 @@ class NotifierChannelTest {
     }
 
     @Test
-    fun `notification ids differ across models sharing a window`() {
-        // Two per-model weekly buckets reset together; if their ids collided,
-        // the second notification would silently replace the first.
-        val key = EventKey("weekly_scoped:Opus", 2_000, TriggerType.WEEKLY_RESET)
-        assertTrue(
-            notificationIdFor(key) != notificationIdFor(key.copy(bucketIdentity = "weekly_scoped:Sonnet")),
-        )
-    }
-
-    @Test
     fun `recording notifier captures events`() {
         val notifier = RecordingNotifier()
         notifier.notify(

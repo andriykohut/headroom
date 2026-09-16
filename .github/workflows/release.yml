@@ -263,10 +263,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # The default also installs `tools`, which Google no longer serves:
+      # android-actions/setup-android#537.
       - uses: android-actions/setup-android@v4
-
-      - name: Install the compile SDK
-        run: sdkmanager --install "platforms;android-37.2" "build-tools;36.0.0"
+        with:
+          packages: platform-tools platforms;android-37.2 build-tools;36.0.0
 
       # basic, not the default 'enhanced': that one loads gradle-actions-caching,
       # a closed-source component under Gradle's commercial Terms of Use, onto

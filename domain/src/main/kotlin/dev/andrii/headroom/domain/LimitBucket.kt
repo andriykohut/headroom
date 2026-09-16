@@ -11,7 +11,6 @@ package dev.andrii.headroom.domain
 enum class BucketKind(val wireName: String, val title: String) {
     SESSION("session", "Current session"),
     WEEKLY_ALL("weekly_all", "Current week (all models)"),
-    WEEKLY_SCOPED("weekly_scoped", "Current week"),
     UNKNOWN("", "");
 
     companion object {
@@ -51,19 +50,7 @@ data class LimitBucket(
     val group: String = "",
     val severity: String = "",
     val isActive: Boolean = false,
-    val scopeLabel: String = "",
 ) {
-    /**
-     * What makes this bucket distinct from its siblings.
-     *
-     * [rawKind] alone is not enough. Every per-model weekly bucket arrives as
-     * `weekly_scoped`, so two models sharing a reset time would collapse onto
-     * one de-duplication key and one of them would go unnotified. The scope
-     * label is the only thing that separates them.
-     */
-    val identity: String
-        get() = if (scopeLabel.isBlank()) rawKind else "$rawKind:$scopeLabel"
-
     /**
      * Whether [now] is past this window's rollover, making [utilization] a
      * figure for a window that has ended.
@@ -89,7 +76,7 @@ data class LimitBucket(
     fun elapsedFraction(now: Long): Double? {
         if (resetsAt <= 0) return null
         val window = when (kind) {
-            BucketKind.WEEKLY_ALL, BucketKind.WEEKLY_SCOPED -> SEVEN_DAYS
+            BucketKind.WEEKLY_ALL -> SEVEN_DAYS
             else -> return null
         }
         return ((window - (resetsAt - now)).toDouble() / window).coerceIn(0.0, 1.0)

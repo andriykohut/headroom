@@ -63,17 +63,15 @@ object UsageParser {
         val kind = BucketKind.fromWire(rawKind)
         val utilization = UTILIZATION_KEYS
             .firstNotNullOfOrNull { obj[it]?.jsonPrimitive?.doubleOrNull } ?: 0.0
-        val scopeLabel = scopeLabel(obj)
         return LimitBucket(
             kind = kind,
             rawKind = rawKind,
-            title = titleFor(kind, rawKind, scopeLabel),
+            title = if (kind != BucketKind.UNKNOWN) kind.title else rawKind,
             utilization = utilization,
             resetsAt = resetsAt(obj["resets_at"]),
             group = obj["group"]?.jsonPrimitive?.contentOrNull ?: "",
             severity = obj["severity"]?.jsonPrimitive?.contentOrNull ?: "",
             isActive = obj["is_active"]?.jsonPrimitive?.booleanOrNull ?: false,
-            scopeLabel = scopeLabel,
         )
     }
 
@@ -109,24 +107,4 @@ object UsageParser {
 
     private fun toNearestMinute(epochSeconds: Long): Long =
         Math.round(epochSeconds / 60.0) * 60L
-
-    /**
-     * The model a scoped bucket applies to, or blank.
-     *
-     * Every step is a safe cast rather than `.jsonObject`, which throws on a
-     * JSON null. The server sends `"scope": null` on unscoped buckets, so the
-     * throwing version fails on two thirds of a real response.
-     */
-    private fun scopeLabel(obj: JsonObject): String =
-        (obj["scope"] as? JsonObject)
-            ?.let { it["model"] as? JsonObject }
-            ?.get("display_name")?.jsonPrimitive?.contentOrNull
-            .orEmpty()
-
-    /** `weekly_scoped` entries name themselves from the model (spec §2). */
-    private fun titleFor(kind: BucketKind, rawKind: String, scopeLabel: String): String = when {
-        scopeLabel.isNotBlank() -> "Current week ($scopeLabel)"
-        kind != BucketKind.UNKNOWN -> kind.title
-        else -> rawKind
-    }
 }

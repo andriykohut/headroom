@@ -32,10 +32,6 @@ class UsageViewModel(
         initialValue = TriggerSettings(),
     )
 
-    init {
-        refresh()
-    }
-
     fun refresh() {
         viewModelScope.launch { repository.refresh() }
     }

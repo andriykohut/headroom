@@ -13,15 +13,13 @@ class TriggerEvaluatorTest {
         kind: BucketKind,
         utilization: Double = 10.0,
         resetsAt: Long = 2_000,
-        scopeLabel: String = "",
     ) = LimitBucket(
         kind = kind,
         rawKind = kind.wireName,
-        title = if (scopeLabel.isBlank()) kind.title else "Current week ($scopeLabel)",
+        title = kind.title,
         utilization = utilization,
         resetsAt = resetsAt,
         group = if (kind == BucketKind.SESSION) "session" else "weekly",
-        scopeLabel = scopeLabel,
     )
 
     private fun snapshot(vararg buckets: LimitBucket, at: Long = 1_000) =
@@ -65,19 +63,6 @@ class TriggerEvaluatorTest {
             listOf(TriggerType.WEEKLY_RESET),
             evaluate(null, current, now = 2_000).map { it.key.type },
         )
-    }
-
-    @Test
-    fun `per model weekly buckets are keyed separately`() {
-        // Both arrive as kind "weekly_scoped" with the same reset time. Keying
-        // on rawKind alone would collapse them and silence one model.
-        val current = snapshot(
-            bucket(BucketKind.WEEKLY_SCOPED, resetsAt = 2_000, scopeLabel = "Opus"),
-            bucket(BucketKind.WEEKLY_SCOPED, resetsAt = 2_000, scopeLabel = "Sonnet"),
-        )
-        val events = evaluate(null, current, now = 2_000)
-        assertEquals(2, events.size)
-        assertEquals(2, events.map { it.key }.toSet().size)
     }
 
     @Test
