@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.andrii.headroom.ui.ImportScreen
 import dev.andrii.headroom.ui.SettingsScreen
 import dev.andrii.headroom.ui.SettingsViewModel
@@ -78,6 +79,13 @@ private fun HeadroomRoot() {
     val usageViewModel: UsageViewModel = koinViewModel()
     val state by usageViewModel.state.collectAsState()
     val usageSettings by usageViewModel.settings.collectAsState()
+
+    // On every start, not just creation: a backgrounded process keeps the
+    // ViewModel alive, and background polls write the cache, not this state.
+    LifecycleStartEffect(usageViewModel) {
+        usageViewModel.refresh()
+        onStopOrDispose {}
+    }
 
     // Back returns to Usage rather than leaving the app, which is what a user
     // who opened Settings expects.
