@@ -11,13 +11,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * [scopeLabel] is persisted, not dropped. The coordinator compares the cached
- * snapshot against the fresh one by bucket identity, and identity is raw kind
- * plus scope label - so losing the label across process death would collapse
- * every per-model weekly bucket onto one identity and silence all but the
- * first.
- */
 @Serializable
 private data class BucketJson(
     val rawKind: String,
@@ -27,7 +20,6 @@ private data class BucketJson(
     val group: String = "",
     val severity: String = "",
     val isActive: Boolean = false,
-    val scopeLabel: String = "",
 )
 
 @Serializable
@@ -55,7 +47,6 @@ class DataStoreSnapshotCache(
                     group = it.group,
                     severity = it.severity,
                     isActive = it.isActive,
-                    scopeLabel = it.scopeLabel,
                 )
             },
             fetchedAt = decoded.fetchedAt,
@@ -75,7 +66,6 @@ class DataStoreSnapshotCache(
                         group = it.group,
                         severity = it.severity,
                         isActive = it.isActive,
-                        scopeLabel = it.scopeLabel,
                     )
                 },
                 fetchedAt = snapshot.fetchedAt,

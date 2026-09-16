@@ -68,16 +68,6 @@ class NextAlarmTest {
     }
 
     @Test
-    fun `per model weekly buckets are scheduled like any other weekly`() {
-        val result = nextAlarmAt(
-            snapshot(bucket(BucketKind.WEEKLY_SCOPED, 4_000)),
-            TriggerSettings(),
-            nowEpochSeconds = 1_000,
-        )
-        assertEquals(4_000, result)
-    }
-
-    @Test
     fun `returns null when all reset triggers are disabled`() {
         assertNull(
             nextAlarmAt(

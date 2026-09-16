@@ -569,8 +569,7 @@ as a form.
 │ When the 5-hour window rolls over      │  bodyMedium onSurfaceVariant
 │                                        │  ↕ 24dp
 │ Weekly reset                      (●)  │
-│ When a weekly window rolls over,       │
-│ per model                              │
+│ When the 7-day window rolls over       │
 │                                        │
 │ Approaching limit                 (●)  │
 │ When any limit passes your warning     │

@@ -28,14 +28,12 @@ private fun bucket(
     kind: BucketKind,
     utilization: Double = 10.0,
     resetsAt: Long = 5_000,
-    scopeLabel: String = "",
 ) = LimitBucket(
     kind = kind,
     rawKind = kind.wireName,
     title = kind.title,
     utilization = utilization,
     resetsAt = resetsAt,
-    scopeLabel = scopeLabel,
 )
 
 private fun snapshot(vararg buckets: LimitBucket, at: Long = 1_000) =
@@ -111,24 +109,6 @@ class NotificationCoordinatorTest {
         val (subject, _) = coordinator({ snapshot(bucket(BucketKind.SESSION, 95.0)) }, log = log)
         subject.runCycle()
         assertEquals(1, log.fired().size)
-    }
-
-    @Test
-    fun `two models crossing together are notified separately`() = runTest {
-        // They share a kind and a reset time; only the scope label separates
-        // them, and this is the path where a collapsed key silences one.
-        val notifier = RecordingNotifier()
-        val (subject, _) = coordinator(
-            {
-                snapshot(
-                    bucket(BucketKind.WEEKLY_SCOPED, 95.0, scopeLabel = "Opus"),
-                    bucket(BucketKind.WEEKLY_SCOPED, 96.0, scopeLabel = "Sonnet"),
-                )
-            },
-            notifier = notifier,
-        )
-        subject.runCycle()
-        assertEquals(2, notifier.events.size)
     }
 
     @Test

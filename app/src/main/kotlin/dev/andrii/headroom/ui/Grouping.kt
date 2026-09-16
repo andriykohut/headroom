@@ -61,7 +61,7 @@ fun groupBuckets(snapshot: UsageSnapshot): List<Band> {
 
 private fun groupFromKind(kind: BucketKind) = when (kind) {
     BucketKind.SESSION -> GROUP_SESSION
-    BucketKind.WEEKLY_ALL, BucketKind.WEEKLY_SCOPED -> GROUP_WEEKLY
+    BucketKind.WEEKLY_ALL -> GROUP_WEEKLY
     BucketKind.UNKNOWN -> ""
 }
 

@@ -82,7 +82,7 @@ fun SettingsScreen(
             )
             TriggerRow(
                 title = "Weekly reset",
-                description = "When a weekly window rolls over, per model",
+                description = "When the 7-day window rolls over",
                 checked = settings.weeklyReset,
                 onCheckedChange = { on -> onChange { it.copy(weeklyReset = on) } },
             )

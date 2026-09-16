@@ -7,7 +7,6 @@ import dev.andrii.headroom.domain.UsageSnapshot
 private val RESET_KINDS = setOf(
     BucketKind.SESSION,
     BucketKind.WEEKLY_ALL,
-    BucketKind.WEEKLY_SCOPED,
 )
 
 /**

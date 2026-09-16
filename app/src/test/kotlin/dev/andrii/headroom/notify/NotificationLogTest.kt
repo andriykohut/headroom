@@ -31,14 +31,6 @@ class NotificationLogTest {
     }
 
     @Test
-    fun `a scoped bucket identity round trips`() {
-        // Per-model weekly identities carry a colon, which is exactly the sort
-        // of character a naive separator would break on.
-        val scoped = EventKey("weekly_scoped:Example Model", 5, TriggerType.WEEKLY_RESET)
-        assertEquals(scoped, parseEventKey(scoped.serialise()))
-    }
-
-    @Test
     fun `serialisation survives a raw kind containing separators`() {
         val awkward = EventKey("weird|kind:name", 5, TriggerType.WALL_HIT)
         assertEquals(awkward, parseEventKey(awkward.serialise()))
@@ -81,20 +73,6 @@ class NotificationLogTest {
     fun `keys differing only by window are distinct`() = runTest {
         val log = InMemoryNotificationLog()
         log.record(listOf(key, key.copy(resetsAt = 3_000)))
-        assertEquals(2, log.fired().size)
-    }
-
-    @Test
-    fun `keys differing only by bucket identity are distinct`() = runTest {
-        // Two models' weekly buckets share a kind and a reset time; only the
-        // identity separates them, and collapsing them silences one.
-        val log = InMemoryNotificationLog()
-        log.record(
-            listOf(
-                key.copy(bucketIdentity = "weekly_scoped:Opus"),
-                key.copy(bucketIdentity = "weekly_scoped:Sonnet"),
-            ),
-        )
         assertEquals(2, log.fired().size)
     }
 

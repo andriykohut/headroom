@@ -50,7 +50,7 @@ class GroupingTest {
     fun `weekly_all leads its band whatever order the server sent`() {
         val snapshot = UsageSnapshot(
             listOf(
-                bucket(BucketKind.WEEKLY_SCOPED, "weekly", "Current week (Opus)"),
+                bucket(BucketKind.UNKNOWN, "weekly", "weekly_future"),
                 bucket(BucketKind.WEEKLY_ALL, "weekly"),
             ),
             0,
@@ -64,14 +64,14 @@ class GroupingTest {
         val snapshot = UsageSnapshot(
             listOf(
                 bucket(BucketKind.WEEKLY_ALL, "weekly"),
-                bucket(BucketKind.WEEKLY_SCOPED, "weekly", "Current week (Sonnet)"),
-                bucket(BucketKind.WEEKLY_SCOPED, "weekly", "Current week (Opus)"),
+                bucket(BucketKind.UNKNOWN, "weekly", "weekly_b"),
+                bucket(BucketKind.UNKNOWN, "weekly", "weekly_a"),
             ),
             0,
         )
         val week = groupBuckets(snapshot).single()
         assertEquals(
-            listOf("All models", "Sonnet", "Opus"),
+            listOf("All models", "weekly_b", "weekly_a"),
             week.buckets.map(::displayLabel),
         )
     }
@@ -108,7 +108,7 @@ class GroupingTest {
         val snapshot = UsageSnapshot(
             listOf(
                 bucket(BucketKind.WEEKLY_ALL, "weekly", resetsAt = 1_000),
-                bucket(BucketKind.WEEKLY_SCOPED, "weekly", "Current week (Opus)", resetsAt = 2_000),
+                bucket(BucketKind.UNKNOWN, "weekly", "weekly_future", resetsAt = 2_000),
             ),
             0,
         )
@@ -127,10 +127,6 @@ class GroupingTest {
             "All models",
             displayLabel(bucket(BucketKind.WEEKLY_ALL, "weekly")),
         )
-        assertEquals(
-            "Example Model",
-            displayLabel(bucket(BucketKind.WEEKLY_SCOPED, "weekly", "Current week (Example Model)")),
-        )
     }
 
     @Test
@@ -143,7 +139,7 @@ class GroupingTest {
 
     @Test
     fun `grouping never reorders on percent`() {
-        val high = LimitBucket(BucketKind.WEEKLY_SCOPED, "weekly_scoped", "Current week (A)", 99.0, 5_000, group = "weekly")
+        val high = LimitBucket(BucketKind.UNKNOWN, "weekly_future", "weekly_future", 99.0, 5_000, group = "weekly")
         val low = LimitBucket(BucketKind.WEEKLY_ALL, "weekly_all", "Current week (all models)", 1.0, 5_000, group = "weekly")
         val week = groupBuckets(UsageSnapshot(listOf(high, low), 0)).single()
         assertTrue(week.buckets.first().kind == BucketKind.WEEKLY_ALL, "anchor must lead, not the largest")

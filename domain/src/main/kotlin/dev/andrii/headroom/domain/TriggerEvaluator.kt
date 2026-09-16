@@ -24,7 +24,7 @@ class TriggerEvaluator {
         val events = mutableListOf<NotificationEvent>()
         for (bucket in current.buckets) {
             if (bucket.kind == BucketKind.UNKNOWN) continue
-            val before = previous?.buckets?.firstOrNull { it.identity == bucket.identity }
+            val before = previous?.buckets?.firstOrNull { it.rawKind == bucket.rawKind }
             resetEvent(bucket, current, settings, nowEpochSeconds, lastCycleAt)?.let(events::add)
             thresholdEvent(bucket, before, settings)?.let(events::add)
             wallEvent(bucket, before, settings)?.let(events::add)
@@ -41,7 +41,7 @@ class TriggerEvaluator {
     ): NotificationEvent? {
         val type = when (bucket.kind) {
             BucketKind.SESSION -> TriggerType.SESSION_RESET
-            BucketKind.WEEKLY_ALL, BucketKind.WEEKLY_SCOPED -> TriggerType.WEEKLY_RESET
+            BucketKind.WEEKLY_ALL -> TriggerType.WEEKLY_RESET
             else -> return null
         }
         val enabled = if (type == TriggerType.SESSION_RESET) settings.sessionReset
@@ -56,7 +56,7 @@ class TriggerEvaluator {
         val watched = lastCycleAt != null && bucket.resetsAt >= lastCycleAt
         if (!watched && now - bucket.resetsAt > windowLength(bucket.kind)) return null
         return NotificationEvent(
-            key = EventKey(bucket.identity, bucket.resetsAt, type),
+            key = EventKey(bucket.rawKind, bucket.resetsAt, type),
             title = "${bucket.title} reset",
             body = "Your ${bucket.title.lowercase()} limit has reset — you have capacity again." +
                 weeklyContext(bucket, current),
@@ -87,7 +87,7 @@ class TriggerEvaluator {
         val threshold = settings.thresholdPercent
         if (bucket.utilization < threshold) return null
         return NotificationEvent(
-            key = EventKey(bucket.identity, bucket.resetsAt, TriggerType.APPROACHING_LIMIT),
+            key = EventKey(bucket.rawKind, bucket.resetsAt, TriggerType.APPROACHING_LIMIT),
             title = "${bucket.title} at ${bucket.utilization.toInt()}%",
             body = "You're approaching your ${bucket.title.lowercase()} limit.",
         )
@@ -116,7 +116,7 @@ class TriggerEvaluator {
         if (bucket.utilization < FULLY_USED) return null
         if (before != null && before.utilization >= FULLY_USED) return null
         return NotificationEvent(
-            key = EventKey(bucket.identity, bucket.resetsAt, TriggerType.WALL_HIT),
+            key = EventKey(bucket.rawKind, bucket.resetsAt, TriggerType.WALL_HIT),
             title = "${bucket.title} limit reached",
             body = "You've used all of your ${bucket.title.lowercase()} limit. " +
                 "It lifts when the window resets.",
