@@ -17,6 +17,14 @@ import kotlinx.coroutines.launch
 fun clampThreshold(value: Double): Double =
     Math.round(value).toDouble().coerceIn(50.0, 99.0)
 
+/**
+ * Keeps a reset gate meaningful. 100 is allowed - "only after I ran out" is a
+ * real choice - and below 10 the gate would pass nearly every reset, which is
+ * what switching it off already does.
+ */
+fun clampResetGate(value: Double): Double =
+    Math.round(value).toDouble().coerceIn(10.0, 100.0)
+
 class SettingsViewModel(
     private val store: SettingsStore,
     private val credentialStore: CredentialStore,
@@ -31,7 +39,13 @@ class SettingsViewModel(
     fun update(transform: (TriggerSettings) -> TriggerSettings) {
         viewModelScope.launch {
             val next = transform(store.current())
-            store.update(next.copy(thresholdPercent = clampThreshold(next.thresholdPercent)))
+            store.update(
+                next.copy(
+                    thresholdPercent = clampThreshold(next.thresholdPercent),
+                    sessionResetMinUsage = clampResetGate(next.sessionResetMinUsage),
+                    weeklyResetMinUsage = clampResetGate(next.weeklyResetMinUsage),
+                ),
+            )
         }
     }
 

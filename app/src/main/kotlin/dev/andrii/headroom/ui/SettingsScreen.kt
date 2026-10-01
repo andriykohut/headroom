@@ -38,11 +38,11 @@ import androidx.compose.ui.unit.dp
 import dev.andrii.headroom.domain.TriggerSettings
 
 /**
- * Four triggers and the number that tunes one of them.
+ * Four triggers and the numbers that tune them.
  *
- * The threshold lives inside the row it belongs to rather than in a section of
- * its own — a setting beside the trigger it affects is what stops this reading
- * as a form.
+ * The threshold and the reset gates live inside the row they belong to rather
+ * than in a section of their own — a setting beside the trigger it affects is
+ * what stops this reading as a form.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,12 +80,30 @@ fun SettingsScreen(
                 checked = settings.sessionReset,
                 onCheckedChange = { on -> onChange { it.copy(sessionReset = on) } },
             )
+            AnimatedVisibility(visible = settings.sessionReset) {
+                ResetGate(
+                    description = "Skip it when the session ended below your line",
+                    onlyIfUsed = settings.sessionResetOnlyIfUsed,
+                    minUsage = settings.sessionResetMinUsage,
+                    onOnlyIfUsedChange = { on -> onChange { it.copy(sessionResetOnlyIfUsed = on) } },
+                    onMinUsageChange = { v -> onChange { it.copy(sessionResetMinUsage = v) } },
+                )
+            }
             TriggerRow(
                 title = "Weekly reset",
                 description = "When the 7-day window rolls over",
                 checked = settings.weeklyReset,
                 onCheckedChange = { on -> onChange { it.copy(weeklyReset = on) } },
             )
+            AnimatedVisibility(visible = settings.weeklyReset) {
+                ResetGate(
+                    description = "Skip it when the week ended below your line",
+                    onlyIfUsed = settings.weeklyResetOnlyIfUsed,
+                    minUsage = settings.weeklyResetMinUsage,
+                    onOnlyIfUsedChange = { on -> onChange { it.copy(weeklyResetOnlyIfUsed = on) } },
+                    onMinUsageChange = { v -> onChange { it.copy(weeklyResetMinUsage = v) } },
+                )
+            }
             TriggerRow(
                 title = "Approaching limit",
                 description = "When any limit passes your warning line",
@@ -93,8 +111,10 @@ fun SettingsScreen(
                 onCheckedChange = { on -> onChange { it.copy(approachingLimit = on) } },
             )
             AnimatedVisibility(visible = settings.approachingLimit) {
-                ThresholdRow(
+                PercentRow(
+                    label = "Warn at",
                     value = settings.thresholdPercent,
+                    valueRange = 50f..99f,
                     onValueChange = { v -> onChange { it.copy(thresholdPercent = v) } },
                 )
             }
@@ -152,6 +172,7 @@ private fun TriggerRow(
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     ListItem(
         headlineContent = { Text(title) },
@@ -160,7 +181,7 @@ private fun TriggerRow(
         },
         trailingContent = { Switch(checked = checked, onCheckedChange = null) },
         // The whole row is the target, not just the switch.
-        modifier = Modifier.toggleable(
+        modifier = modifier.toggleable(
             value = checked,
             role = Role.Switch,
             onValueChange = onCheckedChange,
@@ -168,12 +189,52 @@ private fun TriggerRow(
     )
 }
 
+/**
+ * "Only after heavy use", nested under a reset row.
+ *
+ * Indented so it reads as a qualifier of the reset above it rather than a
+ * fifth trigger. The line is per reset because a session and a week that both
+ * ended at 70% are not the same news.
+ */
 @Composable
-private fun ThresholdRow(value: Double, onValueChange: (Double) -> Unit) {
+private fun ResetGate(
+    description: String,
+    onlyIfUsed: Boolean,
+    minUsage: Double,
+    onOnlyIfUsedChange: (Boolean) -> Unit,
+    onMinUsageChange: (Double) -> Unit,
+) {
+    Column(modifier = Modifier.padding(start = 16.dp)) {
+        TriggerRow(
+            title = "Only after heavy use",
+            description = description,
+            checked = onlyIfUsed,
+            onCheckedChange = onOnlyIfUsedChange,
+        )
+        AnimatedVisibility(visible = onlyIfUsed) {
+            PercentRow(
+                label = "Used at least",
+                value = minUsage,
+                // 100 is "only after I ran out", which is a real choice here
+                // in a way it is not for the warning line.
+                valueRange = 10f..100f,
+                onValueChange = onMinUsageChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PercentRow(
+    label: String,
+    value: Double,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChange: (Double) -> Unit,
+) {
     Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Warn at",
+                label,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -187,10 +248,10 @@ private fun ThresholdRow(value: Double, onValueChange: (Double) -> Unit) {
         Slider(
             value = value.toFloat(),
             onValueChange = { onValueChange(it.toDouble()) },
-            valueRange = 50f..99f,
-            // Continuous: 48 steps draws 48 tick marks, which turns a quiet
-            // row into a dotted rule. clampThreshold already rounds the value
-            // to a whole percent, so the ticks bought nothing.
+            valueRange = valueRange,
+            // Continuous: a step per percent draws a tick mark per percent,
+            // which turns a quiet row into a dotted rule. The view model's
+            // clamps already round to a whole percent, so ticks bought nothing.
             modifier = Modifier.fillMaxWidth(),
         )
     }

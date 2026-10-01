@@ -44,10 +44,18 @@ class TriggerEvaluator {
             BucketKind.WEEKLY_ALL -> TriggerType.WEEKLY_RESET
             else -> return null
         }
-        val enabled = if (type == TriggerType.SESSION_RESET) settings.sessionReset
-        else settings.weeklyReset
+        val session = type == TriggerType.SESSION_RESET
+        val enabled = if (session) settings.sessionReset else settings.weeklyReset
         if (!enabled) return null
         if (now < bucket.resetsAt) return null
+        // Past its reset time, this bucket is the window that just ended, so
+        // its utilization is the last reading of that window - the figure the
+        // gate asks about. It is a floor: use after the last push goes unseen.
+        val onlyIfUsed = if (session) settings.sessionResetOnlyIfUsed
+        else settings.weeklyResetOnlyIfUsed
+        val minUsage = if (session) settings.sessionResetMinUsage
+        else settings.weeklyResetMinUsage
+        if (onlyIfUsed && bucket.utilization < minUsage) return null
         // A stale reading is trusted here rather than doubted: nobody is
         // pushing because the machine that reports is off, so waiting cannot
         // improve it, and a phone asleep until morning is the ordinary case.

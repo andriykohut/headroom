@@ -97,6 +97,53 @@ class TriggerEvaluatorTest {
         assertTrue(evaluate(null, current, now = 2_000 + 28_800, lastCycleAt = 2_100).isEmpty())
     }
 
+    // --- reset gated on use ---
+
+    @Test
+    fun `a gated session reset stays quiet after a light window`() {
+        val current = snapshot(bucket(BucketKind.SESSION, utilization = 30.0, resetsAt = 2_000))
+        val gated = settings.copy(sessionResetOnlyIfUsed = true, sessionResetMinUsage = 80.0)
+        assertTrue(evaluate(null, current, now = 2_000, settings = gated).isEmpty())
+    }
+
+    @Test
+    fun `a gated session reset fires once the window reached the line`() {
+        val current = snapshot(bucket(BucketKind.SESSION, utilization = 80.0, resetsAt = 2_000))
+        val gated = settings.copy(sessionResetOnlyIfUsed = true, sessionResetMinUsage = 80.0)
+        assertEquals(
+            listOf(TriggerType.SESSION_RESET),
+            evaluate(null, current, now = 2_000, settings = gated).map { it.key.type },
+        )
+    }
+
+    @Test
+    fun `the gate's line is ignored while the gate is off`() {
+        val current = snapshot(bucket(BucketKind.SESSION, utilization = 30.0, resetsAt = 2_000))
+        val ungated = settings.copy(sessionResetOnlyIfUsed = false, sessionResetMinUsage = 80.0)
+        assertEquals(
+            listOf(TriggerType.SESSION_RESET),
+            evaluate(null, current, now = 2_000, settings = ungated).map { it.key.type },
+        )
+    }
+
+    @Test
+    fun `the weekly gate has its own line`() {
+        val current = snapshot(
+            bucket(BucketKind.SESSION, utilization = 60.0, resetsAt = 2_000),
+            bucket(BucketKind.WEEKLY_ALL, utilization = 60.0, resetsAt = 2_000),
+        )
+        val gated = settings.copy(
+            sessionResetOnlyIfUsed = true,
+            sessionResetMinUsage = 90.0,
+            weeklyResetOnlyIfUsed = true,
+            weeklyResetMinUsage = 50.0,
+        )
+        assertEquals(
+            listOf(TriggerType.WEEKLY_RESET),
+            evaluate(null, current, now = 2_000, settings = gated).map { it.key.type },
+        )
+    }
+
     // --- threshold ---
 
     @Test
