@@ -28,6 +28,10 @@ class DataStoreSettingsStore(
             approachingLimit = prefs[APPROACHING] ?: defaults.approachingLimit,
             wallHit = prefs[WALL] ?: defaults.wallHit,
             thresholdPercent = prefs[THRESHOLD] ?: defaults.thresholdPercent,
+            sessionResetOnlyIfUsed = prefs[SESSION_GATED] ?: defaults.sessionResetOnlyIfUsed,
+            sessionResetMinUsage = prefs[SESSION_MIN_USAGE] ?: defaults.sessionResetMinUsage,
+            weeklyResetOnlyIfUsed = prefs[WEEKLY_GATED] ?: defaults.weeklyResetOnlyIfUsed,
+            weeklyResetMinUsage = prefs[WEEKLY_MIN_USAGE] ?: defaults.weeklyResetMinUsage,
         )
     }
 
@@ -40,6 +44,10 @@ class DataStoreSettingsStore(
             prefs[APPROACHING] = settings.approachingLimit
             prefs[WALL] = settings.wallHit
             prefs[THRESHOLD] = settings.thresholdPercent
+            prefs[SESSION_GATED] = settings.sessionResetOnlyIfUsed
+            prefs[SESSION_MIN_USAGE] = settings.sessionResetMinUsage
+            prefs[WEEKLY_GATED] = settings.weeklyResetOnlyIfUsed
+            prefs[WEEKLY_MIN_USAGE] = settings.weeklyResetMinUsage
         }
     }
 
@@ -49,5 +57,9 @@ class DataStoreSettingsStore(
         val APPROACHING = booleanPreferencesKey("trigger_approaching_limit")
         val WALL = booleanPreferencesKey("trigger_wall_hit")
         val THRESHOLD = doublePreferencesKey("threshold_percent")
+        val SESSION_GATED = booleanPreferencesKey("session_reset_only_if_used")
+        val SESSION_MIN_USAGE = doublePreferencesKey("session_reset_min_usage")
+        val WEEKLY_GATED = booleanPreferencesKey("weekly_reset_only_if_used")
+        val WEEKLY_MIN_USAGE = doublePreferencesKey("weekly_reset_min_usage")
     }
 }

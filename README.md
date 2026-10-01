@@ -15,7 +15,8 @@
 Headroom renders the same bars as Claude Code's `/usage` — current session,
 current week — and notifies you on four
 events: session reset, weekly reset, an approaching-limit line you choose, and
-hitting the wall.
+hitting the wall. Either reset can be limited to windows you actually used
+heavily.
 
 Your machine reports its usage while you work. A small relay you host keeps the
 last reading. Your phone reads it from there.

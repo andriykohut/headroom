@@ -40,4 +40,19 @@ class ThresholdTest {
             assertEquals(true, clamped in 0.0..100.0, "notch would fall off the track: $clamped")
         }
     }
+
+    @Test
+    fun `a reset gate may sit at the wall`() {
+        // Unlike the warning line, 100 is meaningful here: "only after I ran out".
+        assertEquals(100.0, clampResetGate(100.0))
+        assertEquals(100.0, clampResetGate(250.0))
+    }
+
+    @Test
+    fun `a reset gate keeps a floor and whole percents`() {
+        // Below the floor the gate would let almost every reset through, which
+        // is what switching it off is for.
+        assertEquals(10.0, clampResetGate(0.0))
+        assertEquals(63.0, clampResetGate(62.6))
+    }
 }
