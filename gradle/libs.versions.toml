@@ -11,7 +11,7 @@ zxingcpp = "3.1.1"
 coreKtx = "1.19.1"
 lifecycle = "2.11.0"
 activityCompose = "1.13.0"
-serializationJson = "1.12.0"
+serializationJson = "1.13.0"
 coroutines = "1.11.0"
 
 [libraries]
