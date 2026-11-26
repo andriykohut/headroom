@@ -42,7 +42,7 @@ http-body-util = "0.1"
 tokio = { version = "1", default-features = false, features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "io-util",
 ] }
-qrcode = { version = "0.14", default-features = false }
+qrcode = { version = "0.15", default-features = false }
 flate2 = "1"
 base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
